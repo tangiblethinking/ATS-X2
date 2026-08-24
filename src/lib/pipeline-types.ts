@@ -57,7 +57,7 @@ export type AuditResult = {
   keyword_counts: Record<string, number>;
 };
 
-export const API_KEY_STORAGE = "ats-align.xai-api-key";
+export const API_KEY_STORAGE = "ats-align.gemini-api-key";
 export const DRAFT_STORAGE = "ats-align.draft";
 
 export const MAX_RESUME_CHARS = 80_000;

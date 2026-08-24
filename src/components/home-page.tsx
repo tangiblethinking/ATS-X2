@@ -70,7 +70,7 @@ export function HomePage() {
   const [jobText, setJobText] = useState("");
   const [resumeHtml, setResumeHtml] = useState("");
   const [statuses, setStatuses] = useState<Record<StepId, StepStatus>>(idleStatuses);
-  const [details, setDetails] = useState<Partial<Record<StepId, string>>>({});
+  const [details, setDetails] = useState<Partial<Record<StepId, string>>>({{}});
   const [keywords, setKeywords] = useState<KeywordSet | null>(null);
   const [audit, setAudit] = useState<AuditResult | null>(null);
   const [finalHtml, setFinalHtml] = useState<string | null>(null);
@@ -372,8 +372,8 @@ export function HomePage() {
                 </div>
                 {!apiKey ? (
                   <p className="text-xs text-muted-foreground">
-                    An xAI API key is required. Save one in the header before
-                    running.
+                    A Google AI Studio API key is required. Save one in the header
+                    before running.
                   </p>
                 ) : null}
               </CardContent>

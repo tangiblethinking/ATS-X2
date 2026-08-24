@@ -116,9 +116,18 @@ export function ApiKeyDialog({ apiKey, onChange }: Props) {
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>xAI API key</DialogTitle>
+            <DialogTitle>Google AI Studio API key</DialogTitle>
             <DialogDescription>
-              Stored only in this browser. Sent with each run, never written on
+              Get a free key at{" "}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                aistudio.google.com/apikey
+              </a>
+              . Stored only in this browser. Sent with each run, never written on
               the server. You can save, replace, or delete it at any time.
             </DialogDescription>
           </DialogHeader>
@@ -141,7 +150,7 @@ export function ApiKeyDialog({ apiKey, onChange }: Props) {
                   type={show ? "text" : "password"}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="xai-…"
+                  placeholder="AIza…"
                   className="pr-11 font-mono"
                 />
                 <button

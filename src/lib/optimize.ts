@@ -78,8 +78,8 @@ async function chat(opts: {
   temperature: number;
   json?: boolean;
 }) {
-  const { xaiChat } = await import("./xai.server");
-  return xaiChat({
+  const { geminiChat } = await import("./gemini.server");
+  return geminiChat({
     apiKey: opts.apiKey,
     messages: [
       { role: "system", content: SYSTEM },
@@ -94,8 +94,8 @@ async function chat(opts: {
 export const verifyApiKey = createServerFn({ method: "POST" })
   .validator(z.object({ apiKey: apiKeySchema }))
   .handler(async ({ data }) => {
-    const { verifyXaiKey } = await import("./xai.server");
-    return verifyXaiKey(data.apiKey);
+    const { verifyGeminiKey } = await import("./gemini.server");
+    return verifyGeminiKey(data.apiKey);
   });
 
 export const fetchJobDescription = createServerFn({ method: "POST" })
@@ -148,7 +148,7 @@ ${data.jobText}`,
     });
     if (!result.ok) return result;
     try {
-      const { parseJsonObject } = await import("./xai.server");
+      const { parseJsonObject } = await import("./gemini.server");
       const keywords = asKeywords(parseJsonObject(result.text));
       if (keywords.keywords.length + keywords.phrases.length === 0) {
         return { ok: false as const, error: "No keywords were extracted. Try a fuller job description." };
@@ -300,7 +300,7 @@ ${data.resumeHtml}`,
     });
     if (!result.ok) return result;
     try {
-      const { parseJsonObject } = await import("./xai.server");
+      const { parseJsonObject } = await import("./gemini.server");
       const parsed = asAudit(parseJsonObject(result.text), data.resumeHtml);
       if (parsed.html.length < 40) {
         return { ok: false as const, error: "The audit returned almost no HTML." };
