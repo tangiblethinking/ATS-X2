@@ -23,7 +23,8 @@ Hard rules:
 - Never add skills or achievements the source resume does not already support.
 - Only weave in job-description keywords where they truthfully map to existing experience (synonyms, standard names, or the same work described in the posting's language).
 - Do not keyword-stuff. Do not repeat a term unnaturally.
-- Do not add commentary, markdown fences, or explanations unless the step asks for JSON.`;
+- Do not add commentary, markdown fences, or explanations unless the step asks for JSON.
+- Do not change any location of an existing job in the experience of the html resume.`;
 
 function asKeywords(raw: unknown): KeywordSet {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -196,6 +197,7 @@ Writing:
 - Integrate the keywords naturally into existing bullets and summaries.
 - Prefer the employer's exact tokens when the candidate already did that work.
 - Do not fabricate.
+- Do not change any location at any part of the resume.
 
 ATS KEYWORDS AND PHRASES:
 ${kw}
