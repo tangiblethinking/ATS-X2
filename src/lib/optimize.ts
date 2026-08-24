@@ -16,15 +16,32 @@ const resumeSchema = z
   .min(40, "Paste the HTML of your resume.")
   .max(MAX_RESUME_CHARS, "The resume HTML is too large.");
 
-const SYSTEM = `You are an ATS resume optimization engine. Follow the current step exactly.
+const SYSTEM = `ROLE: ATS Optimization & Dual-Alignment Engine
+OBJECTIVE: Rewrite input resume content to achieve strict syntactic matching and deep semantic alignment against extracted job description (JD) keywords and phrases without hallucinating credentials.
 
-Hard rules:
+### 1. SYNTACTIC ALIGNMENT RULES (Exact Keyword Matching)
+- Exact Term Replication: Integrate extracted keywords, acronyms, and multi-word phrases verbatim into the output text. Do not alter singular/plural forms or spellings of critical toolsets, certifications, or methodologies present in the JD constraint list.
+- Density Control: Ensure high-priority mandatory keywords appear at least once within the professional summary or core competency section and naturally within the experience bullets, avoiding robotic keyword stuffing.
+- Formatting Constraints: Preserve the original HTML structure exactly. Change TEXT CONTENT only. Prohibit inventing tables, columns, graphics, text boxes, or special character bullets beyond what already exists in the source HTML.
+
+### 2. SEMANTIC ALIGNMENT RULES (Contextual Relevance)
+- Thematic Contextualization: Reframe the user's historical experience to map directly to the problem domains, scaling challenges, and business outcomes emphasized in the JD.
+- Structural Enforcement (PAR Formula): Format every experience bullet point strictly using the Action-Task-Result structure embedded with keywords:
+  [Action Verb] + [Task utilizing JD Keyword] + [Context/Scale] + [Quantifiable Impact].
+- Domain Vocabulary Integration: Mirror the industry-specific lexicon of the target vertical to optimize vector embedding proximity scores.
+
+### 3. API & DATA INTEGRITY CONSTRAINTS
+- Zero Hallucination Policy: Never invent metrics, companies, dates, job titles, tools, or institutional credentials not explicitly found in the source profile data. If a mandatory skill is missing from the user profile, adapt adjacent experience transparently without fabricating a false history.
+- Determinism Control: Prefer conservative, rule-adherent generation. Maintain strict factual fidelity.
+- Output Hygiene: Return exclusively the requested structured text/HTML component without conversational filler, preambles, markdown fences, or post-analysis notes unless the step explicitly asks for JSON.
+- Do not change any location of an existing job in the experience of the html resume.
+
+Hard rules (always):
 - Never invent employers, job titles, dates, degrees, certifications, tools, or metrics.
 - Never add skills or achievements the source resume does not already support.
 - Only weave in job-description keywords where they truthfully map to existing experience (synonyms, standard names, or the same work described in the posting's language).
 - Do not keyword-stuff. Do not repeat a term unnaturally.
-- Do not add commentary, markdown fences, or explanations unless the step asks for JSON.
-- Do not change any location of an existing job in the experience of the html resume.`;
+- Do not add commentary, markdown fences, or explanations unless the step asks for JSON.`;
 
 function asKeywords(raw: unknown): KeywordSet {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -184,19 +201,15 @@ export const rewriteResume = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const kw = [
-      ...data.keywords.must_have,
-      ...data.keywords.phrases,
-      ...data.keywords.keywords,
-      ...data.keywords.nice_to_have,
-    ]
-      .filter(Boolean)
-      .join(", ");
+    const mustHave = data.keywords.must_have.filter(Boolean).join(", ");
+    const phrases = data.keywords.phrases.filter(Boolean).join(", ");
+    const keywords = data.keywords.keywords.filter(Boolean).join(", ");
+    const niceToHave = data.keywords.nice_to_have.filter(Boolean).join(", ");
     const result = await chat({
       apiKey: data.apiKey,
       maxTokens: 8192,
-      temperature: 0.4,
-      user: `STEP 2 — Completely rewrite the WHOLE resume so every section is oriented to this job description and its ATS keywords/phrases.
+      temperature: 0.2,
+      user: `STEP 2 — Completely rewrite the WHOLE resume for strict syntactic + deep semantic ATS dual-alignment.
 
 Goal: Conform the existing resume to the target role. The output must read as if the candidate wrote it specifically for this posting, while remaining 100% truthful to the source content.
 
@@ -206,35 +219,53 @@ Layout lock (mandatory):
 - Return ONLY HTML. No markdown, no commentary.
 - Do not change any location at any part of the resume.
 
-Full-orientation rewrite logic (apply to every part of the resume):
+### SYNTACTIC ALIGNMENT (Exact Keyword Matching)
+- Integrate extracted keywords, acronyms, and multi-word phrases VERBATIM. Do not alter singular/plural forms or spellings of critical toolsets, certifications, or methodologies from the must_have / phrases lists.
+- Density: every high-priority must_have keyword must appear at least once in the professional summary or core competencies AND naturally inside experience bullets. Avoid robotic stuffing or consecutive repetition of the same term.
+
+### SEMANTIC ALIGNMENT (Contextual Relevance)
+- Reframe historical experience to map to the problem domains, scaling challenges, and business outcomes emphasized in the JD.
+- Every experience bullet MUST follow the PAR formula:
+  [Action Verb] + [Task utilizing JD Keyword] + [Context/Scale] + [Quantifiable Impact].
+  Use only metrics, scales, and outcomes already present or clearly supported by the source resume. Never invent numbers.
+- Mirror the industry-specific lexicon of the target vertical.
+
+### Full-orientation rewrite logic (apply to every part of the resume)
 1. Professional summary / objective / profile
    - Rewrite so it mirrors the job's top priorities, seniority, and language.
    - Lead with the most relevant strengths and must-have alignments that the source resume already supports.
+   - Place at least one high-priority mandatory keyword/phrase here.
 
 2. Skills / technologies / core competencies
-   - Reorder and rephrase existing skills so the job's must-have and high-priority terms appear first and in the employer's wording where truthful.
+   - Reorder and rephrase existing skills so the job's must-have and high-priority terms appear first and in the employer's exact wording where truthful.
    - Drop or de-emphasize skills that are irrelevant to this posting only if the original content allows; never invent new skills.
 
 3. Experience / work history bullets
-   - Completely rewrite every bullet so it is framed in the language of the job description.
+   - Completely rewrite every bullet with the PAR structure and JD keywords embedded.
    - Map existing achievements, responsibilities, and tools to the closest matching keywords and phrases from the ATS list.
-   - Prefer the employer's exact tokens when the candidate already performed that work (synonyms, standard names, same work described in the posting's language).
-   - Emphasize impact, scope, and outcomes that match what the role asks for.
+   - Prefer the employer's exact tokens when the candidate already performed that work.
    - Preserve all real employers, titles, dates, and locations exactly as they appear.
 
 4. Projects, education, certifications, and other sections
    - Rephrase descriptions and highlight the elements that best match the job's requirements and preferred qualifications.
    - Surface relevant coursework, tools, or credentials using the posting's wording where accurate.
 
-Writing rules:
-- Integrate keywords and phrases naturally throughout; do not stuff or list them awkwardly.
+### Zero Hallucination
 - Do not fabricate employers, titles, dates, degrees, certifications, tools, metrics, or achievements.
 - Only use terms that truthfully map to experience already present in the source resume.
-- Keep the voice professional and human; avoid robotic keyword lists.
-- Every sentence should serve the goal of aligning this candidate to this specific job.
+- If a mandatory skill is missing, adapt adjacent experience transparently; never invent a false history.
 
-ATS KEYWORDS AND PHRASES (use thoroughly and truthfully):
-${kw}
+MUST_HAVE (highest priority — exact replication):
+${mustHave || "(none extracted)"}
+
+PHRASES (multi-word — exact replication):
+${phrases || "(none extracted)"}
+
+KEYWORDS:
+${keywords || "(none extracted)"}
+
+NICE_TO_HAVE:
+${niceToHave || "(none extracted)"}
 
 ORIGINAL RESUME HTML:
 ${data.resumeHtml}`,
@@ -270,6 +301,7 @@ Do not:
 - Change facts, dates, names, or numbers
 - Add new claims
 - Alter HTML tags, attributes, classes, ids, or styles
+- Strip or dilute exact ATS keywords that were intentionally placed in STEP 2
 
 Return ONLY the full HTML. No markdown.
 
@@ -320,6 +352,7 @@ Find:
 
 Fix the HTML: keep the strongest natural occurrence of each term, drop redundant ones.
 Keep tags, attributes, classes, ids, and styles identical except for text changes.
+Preserve must_have terms that appear only once and fit truthfully — do not strip required coverage.
 
 Return JSON only:
 {
