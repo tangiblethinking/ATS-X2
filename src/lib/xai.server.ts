@@ -17,6 +17,9 @@ function statusError(status: number): string {
   if (status === 429) {
     return "The API rate limit was hit. Wait a moment and run again.";
   }
+  if (status === 404) {
+    return "The requested model was not found. Try again or check the model name.";
+  }
   if (status >= 500) {
     return "The model service is unavailable. Try again shortly.";
   }
@@ -43,7 +46,7 @@ export async function xaiChat(opts: {
   json?: boolean;
 }): Promise<ChatResult> {
   const payload = {
-    model: "grok-4.5",
+    model: "grok-4.6",
     messages: opts.messages,
     max_tokens: opts.maxTokens,
     temperature: opts.temperature,
