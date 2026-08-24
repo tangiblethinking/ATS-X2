@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Download, FileDown, Loader2 } from "lucide-react";
+import { Check, Copy, Download, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,9 +12,6 @@ type Props = {
   keywords: KeywordSet | null;
   audit: AuditResult | null;
 };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Html2PdfFn = (element?: HTMLElement | string) => any;
 
 async function copyText(label: string, value: string) {
   try {
@@ -35,220 +32,96 @@ function downloadHtml(html: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Load html2pdf.bundle.min.js once from CDN (no npm dependency). */
-let html2pdfLoader: Promise<Html2PdfFn> | null = null;
+/**
+ * Ensure the document has basic print-friendly defaults without overriding
+ * the resume's own styles. Injected only if no @media print block exists.
+ */
+function withPrintHints(html: string): string {
+  const printCss = `
+@media print {
+  html, body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  @page {
+    size: letter;
+    margin: 0.4in;
+  }
+}
+`;
 
-function loadHtml2Pdf(): Promise<Html2PdfFn> {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("PDF export requires a browser."));
+  // Insert before </head> when present; otherwise prepend a head
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `<style data-ats-print>${printCss}</style></head>`);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const existing = (window as any).html2pdf as Html2PdfFn | undefined;
-  if (typeof existing === "function") {
-    return Promise.resolve(existing);
+  if (/<html\b/i.test(html)) {
+    return html.replace(
+      /<html\b[^>]*>/i,
+      (m) => `${m}<head><meta charset="utf-8"><style data-ats-print>${printCss}</style></head>`,
+    );
   }
-  if (!html2pdfLoader) {
-    html2pdfLoader = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src =
-        "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-      script.async = true;
-      script.onload = () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const lib = (window as any).html2pdf as Html2PdfFn | undefined;
-        if (typeof lib === "function") {
-          resolve(lib);
-        } else {
-          reject(new Error("html2pdf failed to load."));
-        }
-      };
-      script.onerror = () => reject(new Error("Could not load PDF library."));
-      document.head.appendChild(script);
-    });
-  }
-  return html2pdfLoader;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style data-ats-print>${printCss}</style></head><body>${html}</body></html>`;
 }
 
 /**
- * Rewrite html/body selectors so resume CSS still applies when the markup
- * lives under #ats-pdf-export-host instead of a real document root.
+ * Open the full resume HTML in a new browser tab and trigger the print dialog
+ * so the user can choose "Save as PDF". This preserves the original layout
+ * and styles exactly — no canvas/html2pdf rasterization.
  */
-function scopeResumeCss(css: string): string {
-  return css
-    .replace(/(^|[,\s}])html(?=[\s,{.#:\[])/gi, "$1#ats-pdf-export-host")
-    .replace(/(^|[,\s}])body(?=[\s,{.#:\[])/gi, "$1#ats-pdf-export-host");
-}
+function openResumeForPrint(html: string) {
+  const docHtml = withPrintHints(html);
 
-function parseResumeDocument(html: string): {
-  styles: string;
-  bodyHtml: string;
-  bodyClass: string;
-  bodyStyle: string;
-} {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
-
-  const styleParts: string[] = [];
-  doc.querySelectorAll("style").forEach((el) => {
-    styleParts.push(el.textContent ?? "");
-  });
-
-  const body = doc.body;
-  return {
-    styles: scopeResumeCss(styleParts.join("\n")),
-    bodyHtml: body ? body.innerHTML : html,
-    bodyClass: body?.getAttribute("class") ?? "",
-    bodyStyle: body?.getAttribute("style") ?? "",
-  };
-}
-
-/** High-fidelity fallback: open the resume and trigger the browser print dialog (Save as PDF). */
-function printResumeAsPdf(html: string) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank", "noopener,noreferrer");
+  // Must not use noopener — we need a handle to call print()
+  const win = window.open("", "_blank");
   if (!win) {
-    URL.revokeObjectURL(url);
-    throw new Error("Pop-up blocked. Allow pop-ups to print the resume as PDF.");
+    toast.error("Pop-up blocked. Allow pop-ups for this site, then try again.");
+    return;
   }
-  const trigger = () => {
+
+  win.document.open();
+  win.document.write(docHtml);
+  win.document.close();
+  win.document.title = "resume-ats";
+
+  const runPrint = () => {
     try {
       win.focus();
       win.print();
-    } finally {
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      toast.message("Resume opened in a new tab — use Print → Save as PDF.");
     }
   };
-  // Some browsers fire load before styles settle
+
+  // Wait for layout/fonts; also handle already-complete documents
   if (win.document.readyState === "complete") {
-    window.setTimeout(trigger, 250);
+    window.setTimeout(runPrint, 400);
   } else {
-    win.addEventListener("load", () => window.setTimeout(trigger, 250));
+    win.addEventListener("load", () => window.setTimeout(runPrint, 400));
+    // Safety if load never fires
+    window.setTimeout(runPrint, 1500);
   }
-  toast.message("Use the print dialog → Save as PDF for a full-layout copy.");
+
+  toast.success('Print dialog opened — choose "Save as PDF".');
 }
 
-/**
- * Mount the resume (styles + markup) into the main document so html2canvas
- * can clone it with CSS intact, then export to a letter PDF.
- */
-async function downloadPdf(html: string) {
-  const html2pdf = await loadHtml2Pdf();
-  const { styles, bodyHtml, bodyClass, bodyStyle } = parseResumeDocument(html);
-
-  const host = document.createElement("div");
-  host.id = "ats-pdf-export-host";
-  host.setAttribute("aria-hidden", "true");
-  if (bodyClass) host.className = bodyClass;
-  host.style.cssText = [
-    "position:fixed",
-    "left:0",
-    "top:0",
-    "width:816px",
-    "max-width:816px",
-    "min-height:1056px",
-    "margin:0",
-    "padding:0",
-    "background:#ffffff",
-    "color:#000000",
-    "z-index:2147483646",
-    // Nearly invisible but still "rendered" so layout engines run
-    "opacity:0.01",
-    "pointer-events:none",
-    "overflow:visible",
-    bodyStyle,
-  ]
-    .filter(Boolean)
-    .join(";");
-
-  const styleEl = document.createElement("style");
-  styleEl.textContent = `
-    #ats-pdf-export-host, #ats-pdf-export-host * {
-      box-sizing: border-box;
-    }
-    ${styles}
-  `;
-
-  const content = document.createElement("div");
-  content.id = "ats-pdf-export-content";
-  content.style.cssText = "width:100%;margin:0;padding:0;";
-  content.innerHTML = bodyHtml;
-
-  host.appendChild(styleEl);
-  host.appendChild(content);
-  document.body.appendChild(host);
-
-  try {
-    await new Promise<void>((r) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => r())),
-    );
-    await new Promise<void>((r) => window.setTimeout(r, 400));
-
-    const measuredHeight = Math.max(
-      content.scrollHeight,
-      content.offsetHeight,
-      host.scrollHeight,
-      1056,
-    );
-    host.style.height = `${measuredHeight}px`;
-
-    // Sanity: if almost no content rendered, fall back to print
-    if (content.scrollHeight < 40 && content.textContent?.trim().length === 0) {
-      throw new Error("Resume content did not render for capture.");
-    }
-
-    const opt = {
-      margin: [0.25, 0.25, 0.25, 0.25] as [number, number, number, number],
-      filename: "resume-ats.pdf",
-      image: { type: "jpeg" as const, quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: "#ffffff",
-        width: 816,
-        windowWidth: 816,
-        height: measuredHeight,
-        windowHeight: measuredHeight,
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        x: 0,
-        y: 0,
-        onclone: (clonedDoc: Document) => {
-          const clonedHost = clonedDoc.getElementById("ats-pdf-export-host");
-          if (clonedHost) {
-            clonedHost.style.opacity = "1";
-            clonedHost.style.position = "static";
-            clonedHost.style.left = "auto";
-            clonedHost.style.top = "auto";
-            clonedHost.style.zIndex = "auto";
-          }
-        },
-      },
-      jsPDF: {
-        unit: "in" as const,
-        format: "letter" as const,
-        orientation: "portrait" as const,
-      },
-      pagebreak: { mode: ["css", "legacy"] as const },
-    };
-
-    // Capture the host (styles + content), not only the inner content div
-    await html2pdf().set(opt).from(host).save();
-    toast.success("PDF downloaded.");
-  } catch (primaryErr) {
-    // Fall back to browser print → Save as PDF (best layout fidelity)
-    console.warn("html2pdf capture failed, falling back to print", primaryErr);
-    printResumeAsPdf(html);
-  } finally {
-    host.remove();
+/** Open the resume HTML in a new tab without auto-printing (user can print later). */
+function openResumeInTab(html: string) {
+  const docHtml = withPrintHints(html);
+  const win = window.open("", "_blank");
+  if (!win) {
+    toast.error("Pop-up blocked. Allow pop-ups for this site, then try again.");
+    return;
   }
+  win.document.open();
+  win.document.write(docHtml);
+  win.document.close();
+  win.document.title = "resume-ats";
+  win.focus();
+  toast.success("Resume opened in a new tab.");
 }
 
 export function OutputPanel({ html, keywords, audit }: Props) {
   const [copied, setCopied] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
 
   if (!html && !keywords) {
     return (
@@ -292,28 +165,20 @@ export function OutputPanel({ html, keywords, audit }: Props) {
             </Button>
             <Button
               type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => openResumeInTab(html)}
+            >
+              Open
+            </Button>
+            <Button
+              type="button"
               variant="paper"
               size="sm"
-              disabled={pdfBusy}
-              onClick={async () => {
-                setPdfBusy(true);
-                try {
-                  await downloadPdf(html);
-                } catch (err) {
-                  const message =
-                    err instanceof Error ? err.message : "Could not create PDF.";
-                  toast.error(message);
-                } finally {
-                  setPdfBusy(false);
-                }
-              }}
+              onClick={() => openResumeForPrint(html)}
             >
-              {pdfBusy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <FileDown className="size-3.5" />
-              )}
-              {pdfBusy ? "PDF…" : "PDF"}
+              <Printer className="size-3.5" />
+              PDF / Print
             </Button>
           </div>
         ) : null}
