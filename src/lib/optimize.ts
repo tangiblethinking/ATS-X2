@@ -34,7 +34,7 @@ function asKeywords(raw: unknown): KeywordSet {
           .filter((x): x is string => typeof x === "string")
           .map((s) => s.trim())
           .filter(Boolean)
-          .slice(0, 80)
+          .slice(0, 250)
       : [];
   return {
     keywords: list(obj.keywords),
@@ -129,20 +129,30 @@ export const extractKeywords = createServerFn({ method: "POST" })
     const result = await chat({
       apiKey: data.apiKey,
       json: true,
-      maxTokens: 2500,
-      temperature: 0.2,
-      user: `STEP 1 — Extract ATS keywords and phrases from this job description.
+      maxTokens: 8000,
+      temperature: 0.15,
+      user: `STEP 1 — Exhaustively extract EVERY ATS-relevant keyword and phrase from this job description.
+
+Be completely thorough. Do not stop at a short list. Scrape the entire posting and return the maximum useful signal an ATS and a recruiter would care about.
 
 Return JSON only, shape:
 {
-  "keywords": string[],   // single tokens: tools, skills, certs, titles, domain terms
-  "phrases": string[],    // multi-word requirements copied closely from the posting
-  "must_have": string[],  // required qualifications
-  "nice_to_have": string[]
+  "keywords": string[],      // single tokens: tools, technologies, skills, certifications, job titles, domain terms, methodologies, soft skills, industry terms, acronyms, software, platforms, frameworks, languages, standards, regulations
+  "phrases": string[],       // multi-word requirements, responsibilities, qualifications, and capability statements copied closely from the posting (e.g. "cross-functional collaboration", "end-to-end ownership", "stakeholder management")
+  "must_have": string[],     // explicitly required / minimum qualifications, years of experience, degrees, certifications, must-know tools
+  "nice_to_have": string[]   // preferred, bonus, "nice to have", "plus", preferred qualifications
 }
 
-Deduplicate. Prefer the employer's exact wording (the tokens an ATS will scan).
-No prose.
+Extraction rules (mandatory):
+- Extract as many distinct items as the posting contains. Target 40–120+ total items across all arrays when the JD is rich; never artificially limit yourself to a handful.
+- Prefer the employer's exact wording and casing (the tokens an ATS will scan).
+- Include synonyms and near-variants that appear in the text (e.g. both "JS" and "JavaScript" if both appear).
+- Capture action-oriented capability phrases from responsibilities and requirements sections.
+- Capture every tool, technology, platform, language, framework, methodology, certification, and domain term.
+- Capture soft-skill and leadership phrases when they are written as requirements or preferred traits.
+- Deduplicate exact duplicates only. Keep close variants if the wording differs.
+- Do not invent terms that are not present or strongly implied by the posting.
+- No prose, no explanations, JSON only.
 
 JOB DESCRIPTION:
 ${data.jobText}`,
@@ -185,21 +195,45 @@ export const rewriteResume = createServerFn({ method: "POST" })
     const result = await chat({
       apiKey: data.apiKey,
       maxTokens: 8192,
-      temperature: 0.35,
-      user: `STEP 2 — Rewrite the WHOLE resume so it uses the ATS keywords and phrases where they truthfully apply.
+      temperature: 0.4,
+      user: `STEP 2 — Completely rewrite the WHOLE resume so every section is oriented to this job description and its ATS keywords/phrases.
+
+Goal: Conform the existing resume to the target role. The output must read as if the candidate wrote it specifically for this posting, while remaining 100% truthful to the source content.
 
 Layout lock (mandatory):
 - Keep every tag, attribute, class, id, inline style, <style> block, table, and document structure from the original HTML.
 - Change TEXT CONTENT only. Do not restyle. Do not add or remove sections, columns, or wrappers.
 - Return ONLY HTML. No markdown, no commentary.
-
-Writing:
-- Integrate the keywords naturally into existing bullets and summaries.
-- Prefer the employer's exact tokens when the candidate already did that work.
-- Do not fabricate.
 - Do not change any location at any part of the resume.
 
-ATS KEYWORDS AND PHRASES:
+Full-orientation rewrite logic (apply to every part of the resume):
+1. Professional summary / objective / profile
+   - Rewrite so it mirrors the job's top priorities, seniority, and language.
+   - Lead with the most relevant strengths and must-have alignments that the source resume already supports.
+
+2. Skills / technologies / core competencies
+   - Reorder and rephrase existing skills so the job's must-have and high-priority terms appear first and in the employer's wording where truthful.
+   - Drop or de-emphasize skills that are irrelevant to this posting only if the original content allows; never invent new skills.
+
+3. Experience / work history bullets
+   - Completely rewrite every bullet so it is framed in the language of the job description.
+   - Map existing achievements, responsibilities, and tools to the closest matching keywords and phrases from the ATS list.
+   - Prefer the employer's exact tokens when the candidate already performed that work (synonyms, standard names, same work described in the posting's language).
+   - Emphasize impact, scope, and outcomes that match what the role asks for.
+   - Preserve all real employers, titles, dates, and locations exactly as they appear.
+
+4. Projects, education, certifications, and other sections
+   - Rephrase descriptions and highlight the elements that best match the job's requirements and preferred qualifications.
+   - Surface relevant coursework, tools, or credentials using the posting's wording where accurate.
+
+Writing rules:
+- Integrate keywords and phrases naturally throughout; do not stuff or list them awkwardly.
+- Do not fabricate employers, titles, dates, degrees, certifications, tools, metrics, or achievements.
+- Only use terms that truthfully map to experience already present in the source resume.
+- Keep the voice professional and human; avoid robotic keyword lists.
+- Every sentence should serve the goal of aligning this candidate to this specific job.
+
+ATS KEYWORDS AND PHRASES (use thoroughly and truthfully):
 ${kw}
 
 ORIGINAL RESUME HTML:
