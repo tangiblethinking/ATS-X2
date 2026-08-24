@@ -69,8 +69,22 @@ function loadHtml2Pdf(): Promise<Html2PdfFn> {
   return html2pdfLoader;
 }
 
-/** Pull style tags + body markup from a full HTML document string. */
-function parseResumeDocument(html: string): { styles: string; bodyHtml: string } {
+/**
+ * Rewrite html/body selectors so resume CSS still applies when the markup
+ * lives under #ats-pdf-export-host instead of a real document root.
+ */
+function scopeResumeCss(css: string): string {
+  return css
+    .replace(/(^|[,\s}])html(?=[\s,{.#:\[])/gi, "$1#ats-pdf-export-host")
+    .replace(/(^|[,\s}])body(?=[\s,{.#:\[])/gi, "$1#ats-pdf-export-host");
+}
+
+function parseResumeDocument(html: string): {
+  styles: string;
+  bodyHtml: string;
+  bodyClass: string;
+  bodyStyle: string;
+} {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
 
@@ -78,68 +92,86 @@ function parseResumeDocument(html: string): { styles: string; bodyHtml: string }
   doc.querySelectorAll("style").forEach((el) => {
     styleParts.push(el.textContent ?? "");
   });
-  // Linked stylesheets cannot be fetched cross-origin; inline any that are data: or same-origin later if needed.
 
   const body = doc.body;
-  const bodyHtml = body ? body.innerHTML : html;
-
-  // Preserve body class/style so layout wrappers still work
-  const bodyClass = body?.getAttribute("class") ?? "";
-  const bodyStyle = body?.getAttribute("style") ?? "";
-
   return {
-    styles: styleParts.join("\n"),
-    bodyHtml:
-      bodyClass || bodyStyle
-        ? `<div class="${bodyClass}" style="${bodyStyle}">${bodyHtml}</div>`
-        : bodyHtml,
+    styles: scopeResumeCss(styleParts.join("\n")),
+    bodyHtml: body ? body.innerHTML : html,
+    bodyClass: body?.getAttribute("class") ?? "",
+    bodyStyle: body?.getAttribute("style") ?? "",
   };
 }
 
+/** High-fidelity fallback: open the resume and trigger the browser print dialog (Save as PDF). */
+function printResumeAsPdf(html: string) {
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank", "noopener,noreferrer");
+  if (!win) {
+    URL.revokeObjectURL(url);
+    throw new Error("Pop-up blocked. Allow pop-ups to print the resume as PDF.");
+  }
+  const trigger = () => {
+    try {
+      win.focus();
+      win.print();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  };
+  // Some browsers fire load before styles settle
+  if (win.document.readyState === "complete") {
+    window.setTimeout(trigger, 250);
+  } else {
+    win.addEventListener("load", () => window.setTimeout(trigger, 250));
+  }
+  toast.message("Use the print dialog → Save as PDF for a full-layout copy.");
+}
+
 /**
- * Mount the resume (styles + markup) into the *main* document so html2canvas
+ * Mount the resume (styles + markup) into the main document so html2canvas
  * can clone it with CSS intact, then export to a letter PDF.
- *
- * html2pdf clones the target into the parent document; targeting an iframe
- * body loses the iframe's stylesheets and only captures fragments.
  */
 async function downloadPdf(html: string) {
   const html2pdf = await loadHtml2Pdf();
-  const { styles, bodyHtml } = parseResumeDocument(html);
+  const { styles, bodyHtml, bodyClass, bodyStyle } = parseResumeDocument(html);
 
-  // Letter width at 96dpi ≈ 816px; height grows with content
   const host = document.createElement("div");
   host.id = "ats-pdf-export-host";
   host.setAttribute("aria-hidden", "true");
+  if (bodyClass) host.className = bodyClass;
   host.style.cssText = [
     "position:fixed",
     "left:0",
     "top:0",
     "width:816px",
     "max-width:816px",
+    "min-height:1056px",
     "margin:0",
     "padding:0",
     "background:#ffffff",
     "color:#000000",
-    "z-index:-1",
+    "z-index:2147483646",
+    // Nearly invisible but still "rendered" so layout engines run
     "opacity:0.01",
     "pointer-events:none",
     "overflow:visible",
-  ].join(";");
+    bodyStyle,
+  ]
+    .filter(Boolean)
+    .join(";");
 
   const styleEl = document.createElement("style");
   styleEl.textContent = `
     #ats-pdf-export-host, #ats-pdf-export-host * {
       box-sizing: border-box;
     }
-    #ats-pdf-export-host {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-    }
     ${styles}
   `;
 
   const content = document.createElement("div");
   content.id = "ats-pdf-export-content";
+  content.style.cssText = "width:100%;margin:0;padding:0;";
   content.innerHTML = bodyHtml;
 
   host.appendChild(styleEl);
@@ -147,11 +179,11 @@ async function downloadPdf(html: string) {
   document.body.appendChild(host);
 
   try {
-    // Let layout / webfonts settle
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    await new Promise<void>((r) => window.setTimeout(r, 300));
+    await new Promise<void>((r) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => r())),
+    );
+    await new Promise<void>((r) => window.setTimeout(r, 400));
 
-    // Measure actual content height so multi-page resumes are fully captured
     const measuredHeight = Math.max(
       content.scrollHeight,
       content.offsetHeight,
@@ -160,8 +192,13 @@ async function downloadPdf(html: string) {
     );
     host.style.height = `${measuredHeight}px`;
 
+    // Sanity: if almost no content rendered, fall back to print
+    if (content.scrollHeight < 40 && content.textContent?.trim().length === 0) {
+      throw new Error("Resume content did not render for capture.");
+    }
+
     const opt = {
-      margin: [0.35, 0.35, 0.35, 0.35] as [number, number, number, number],
+      margin: [0.25, 0.25, 0.25, 0.25] as [number, number, number, number],
       filename: "resume-ats.pdf",
       image: { type: "jpeg" as const, quality: 0.98 },
       html2canvas: {
@@ -175,20 +212,35 @@ async function downloadPdf(html: string) {
         height: measuredHeight,
         windowHeight: measuredHeight,
         scrollX: 0,
-        scrollY: 0,
+        scrollY: -window.scrollY,
         x: 0,
         y: 0,
+        onclone: (clonedDoc: Document) => {
+          const clonedHost = clonedDoc.getElementById("ats-pdf-export-host");
+          if (clonedHost) {
+            clonedHost.style.opacity = "1";
+            clonedHost.style.position = "static";
+            clonedHost.style.left = "auto";
+            clonedHost.style.top = "auto";
+            clonedHost.style.zIndex = "auto";
+          }
+        },
       },
       jsPDF: {
         unit: "in" as const,
         format: "letter" as const,
         orientation: "portrait" as const,
       },
-      pagebreak: { mode: ["avoid-all", "css", "legacy"] as const },
+      pagebreak: { mode: ["css", "legacy"] as const },
     };
 
-    await html2pdf().set(opt).from(content).save();
+    // Capture the host (styles + content), not only the inner content div
+    await html2pdf().set(opt).from(host).save();
     toast.success("PDF downloaded.");
+  } catch (primaryErr) {
+    // Fall back to browser print → Save as PDF (best layout fidelity)
+    console.warn("html2pdf capture failed, falling back to print", primaryErr);
+    printResumeAsPdf(html);
   } finally {
     host.remove();
   }
