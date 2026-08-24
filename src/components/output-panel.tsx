@@ -13,6 +13,9 @@ type Props = {
   audit: AuditResult | null;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Html2PdfFn = (element?: HTMLElement | string) => any;
+
 async function copyText(label: string, value: string) {
   try {
     await navigator.clipboard.writeText(value);
@@ -33,20 +36,17 @@ function downloadHtml(html: string) {
 }
 
 /** Load html2pdf.bundle.min.js once from CDN (no npm dependency). */
-let html2pdfLoader: Promise<typeof import("html2pdf.js")> | null = null;
+let html2pdfLoader: Promise<Html2PdfFn> | null = null;
 
-function loadHtml2Pdf(): Promise<{
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: any;
-}> {
+function loadHtml2Pdf(): Promise<Html2PdfFn> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("PDF export requires a browser."));
   }
   // Already loaded globally by a previous call
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const existing = (window as any).html2pdf;
+  const existing = (window as any).html2pdf as Html2PdfFn | undefined;
   if (typeof existing === "function") {
-    return Promise.resolve({ default: existing });
+    return Promise.resolve(existing);
   }
   if (!html2pdfLoader) {
     html2pdfLoader = new Promise((resolve, reject) => {
@@ -56,9 +56,9 @@ function loadHtml2Pdf(): Promise<{
       script.async = true;
       script.onload = () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const lib = (window as any).html2pdf;
+        const lib = (window as any).html2pdf as Html2PdfFn | undefined;
         if (typeof lib === "function") {
-          resolve({ default: lib });
+          resolve(lib);
         } else {
           reject(new Error("html2pdf failed to load."));
         }
@@ -75,7 +75,7 @@ function loadHtml2Pdf(): Promise<{
  * so all embedded <style> / layout rules apply, then snapshot to PDF.
  */
 async function downloadPdf(html: string) {
-  const { default: html2pdf } = await loadHtml2Pdf();
+  const html2pdf = await loadHtml2Pdf();
 
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
@@ -85,8 +85,7 @@ async function downloadPdf(html: string) {
 
   try {
     const doc = iframe.contentDocument;
-    const win = iframe.contentWindow;
-    if (!doc || !win) {
+    if (!doc) {
       throw new Error("Could not create print frame.");
     }
 
@@ -98,7 +97,6 @@ async function downloadPdf(html: string) {
     await new Promise<void>((resolve) => {
       const done = () => resolve();
       if (doc.readyState === "complete") {
-        // Give layout a beat after parse
         window.setTimeout(done, 150);
       } else {
         iframe.onload = () => window.setTimeout(done, 150);
@@ -110,7 +108,7 @@ async function downloadPdf(html: string) {
     const target =
       doc.body && doc.body.childNodes.length > 0 ? doc.body : doc.documentElement;
 
-    // Letter size in inches; scale 2 for sharper text
+    // Letter size; scale 2 for sharper text; preserve resume CSS via iframe DOM
     const opt = {
       margin: [0.4, 0.4, 0.4, 0.4] as [number, number, number, number],
       filename: "resume-ats.pdf",
