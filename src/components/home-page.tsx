@@ -70,7 +70,7 @@ export function HomePage() {
   const [jobText, setJobText] = useState("");
   const [resumeHtml, setResumeHtml] = useState("");
   const [statuses, setStatuses] = useState<Record<StepId, StepStatus>>(idleStatuses);
-  const [details, setDetails] = useState<Partial<Record<StepId, string>>>({{}});
+  const [details, setDetails] = useState<Partial<Record<StepId, string>>>({});
   const [keywords, setKeywords] = useState<KeywordSet | null>(null);
   const [audit, setAudit] = useState<AuditResult | null>(null);
   const [finalHtml, setFinalHtml] = useState<string | null>(null);
