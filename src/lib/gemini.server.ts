@@ -8,21 +8,37 @@ export type ChatResult =
   | { ok: false; error: string; status?: number };
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-/** Fast, high-context model suitable for long resume HTML rewrites. */
-const GEMINI_MODEL = "gemini-2.5-flash";
+
+/**
+ * Free-tier-friendly Flash / Flash-Lite models (Google AI Studio).
+ * Tried in order until one succeeds (404 / not-found / quota → next).
+ * Prefer Flash-Lite first for higher free RPM, then full Flash.
+ */
+const FREE_TIER_MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.7-flash",
+] as const;
 
 function statusError(status: number): string {
   if (status === 400) {
     return "The request was rejected. Check the API key and try again.";
   }
   if (status === 401 || status === 403) {
-    return "The API key was rejected. Check it and try again.";
+    return "The Google API key was rejected. Create a free key at aistudio.google.com/apikey.";
+  }
+  if (status === 404) {
+    return "That Gemini model is not available on this key. Try another free Flash model or create a new key.";
   }
   if (status === 429) {
-    return "The API rate limit was hit. Wait a moment and run again.";
+    return "Google free-tier rate limit hit. Wait a minute and run again (Flash-Lite has higher free RPM)."
   }
   if (status >= 500) {
-    return "The model service is unavailable. Try again shortly.";
+    return "The Gemini service is unavailable. Try again shortly.";
   }
   return `The API returned an error (${status}).`;
 }
@@ -57,13 +73,12 @@ async function parseGenerateBody(res: Response): Promise<string> {
   return text;
 }
 
-export async function geminiChat(opts: {
-  apiKey: string;
+function buildPayload(opts: {
   messages: ChatMessage[];
   maxTokens: number;
   temperature: number;
   json?: boolean;
-}): Promise<ChatResult> {
+}): Record<string, unknown> {
   const systemParts = opts.messages
     .filter((m) => m.role === "system")
     .map((m) => m.content)
@@ -92,24 +107,28 @@ export async function geminiChat(opts: {
     };
   }
 
-  const url = `${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`;
+  return payload;
+}
+
+export async function geminiChat(opts: {
+  apiKey: string;
+  messages: ChatMessage[];
+  maxTokens: number;
+  temperature: number;
+  json?: boolean;
+}): Promise<ChatResult> {
+  const payload = buildPayload(opts);
   const headers = {
     "Content-Type": "application/json",
     "x-goog-api-key": opts.apiKey,
   };
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return { ok: false, error: "Could not reach the model service." };
-  }
+  let lastError = "Could not reach the model service.";
+  let lastStatus: number | undefined;
 
-  if (!res.ok && res.status >= 500) {
+  for (const model of FREE_TIER_MODELS) {
+    const url = `${GEMINI_BASE}/models/${model}:generateContent`;
+    let res: Response;
     try {
       res = await fetch(url, {
         method: "POST",
@@ -117,30 +136,61 @@ export async function geminiChat(opts: {
         body: JSON.stringify(payload),
       });
     } catch {
-      return { ok: false, error: "Could not reach the model service." };
+      lastError = "Could not reach the model service.";
+      continue;
     }
+
+    // Retry once on 5xx for this model
+    if (!res.ok && res.status >= 500) {
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        lastError = "Could not reach the model service.";
+        continue;
+      }
+    }
+
+    if (res.ok) {
+      try {
+        const text = await parseGenerateBody(res);
+        return { ok: true, text };
+      } catch (err) {
+        return {
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : "The model response could not be read.",
+        };
+      }
+    }
+
+    lastStatus = res.status;
+    lastError = statusError(res.status);
+
+    // Auth failures are not model-specific — stop trying
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: lastError, status: res.status };
+    }
+
+    // 404 / 400 (model unavailable) or 429 (quota on this model) → try next free model
+    if (res.status === 404 || res.status === 400 || res.status === 429) {
+      continue;
+    }
+
+    return { ok: false, error: lastError, status: res.status };
   }
 
-  if (!res.ok) {
-    return { ok: false, error: statusError(res.status), status: res.status };
-  }
-
-  try {
-    const text = await parseGenerateBody(res);
-    return { ok: true, text };
-  } catch (err) {
-    return {
-      ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : "The model response could not be read.",
-    };
-  }
+  return { ok: false, error: lastError, status: lastStatus };
 }
 
 export async function verifyGeminiKey(apiKey: string): Promise<ChatResult> {
-  const url = `${GEMINI_BASE}/models/${GEMINI_MODEL}`;
+  // List models is the lightest way to validate a Google AI Studio key
+  const url = `${GEMINI_BASE}/models?pageSize=5`;
   let res: Response;
   try {
     res = await fetch(url, {
