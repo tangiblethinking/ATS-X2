@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Download } from "lucide-react";
+import { Check, Copy, Download, FileDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,8 +32,114 @@ function downloadHtml(html: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Load html2pdf.bundle.min.js once from CDN (no npm dependency). */
+let html2pdfLoader: Promise<typeof import("html2pdf.js")> | null = null;
+
+function loadHtml2Pdf(): Promise<{
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  default: any;
+}> {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("PDF export requires a browser."));
+  }
+  // Already loaded globally by a previous call
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const existing = (window as any).html2pdf;
+  if (typeof existing === "function") {
+    return Promise.resolve({ default: existing });
+  }
+  if (!html2pdfLoader) {
+    html2pdfLoader = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+      script.async = true;
+      script.onload = () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lib = (window as any).html2pdf;
+        if (typeof lib === "function") {
+          resolve({ default: lib });
+        } else {
+          reject(new Error("html2pdf failed to load."));
+        }
+      };
+      script.onerror = () => reject(new Error("Could not load PDF library."));
+      document.head.appendChild(script);
+    });
+  }
+  return html2pdfLoader;
+}
+
+/**
+ * Render the full resume HTML document in a temporary off-screen iframe
+ * so all embedded <style> / layout rules apply, then snapshot to PDF.
+ */
+async function downloadPdf(html: string) {
+  const { default: html2pdf } = await loadHtml2Pdf();
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText =
+    "position:fixed;left:-9999px;top:0;width:816px;height:1056px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(iframe);
+
+  try {
+    const doc = iframe.contentDocument;
+    const win = iframe.contentWindow;
+    if (!doc || !win) {
+      throw new Error("Could not create print frame.");
+    }
+
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Wait for styles, fonts, and images inside the resume document
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      if (doc.readyState === "complete") {
+        // Give layout a beat after parse
+        window.setTimeout(done, 150);
+      } else {
+        iframe.onload = () => window.setTimeout(done, 150);
+        window.setTimeout(done, 2000); // safety
+      }
+    });
+
+    // Prefer body; fall back to documentElement if body is empty
+    const target =
+      doc.body && doc.body.childNodes.length > 0 ? doc.body : doc.documentElement;
+
+    // Letter size in inches; scale 2 for sharper text
+    const opt = {
+      margin: [0.4, 0.4, 0.4, 0.4] as [number, number, number, number],
+      filename: "resume-ats.pdf",
+      image: { type: "jpeg" as const, quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+        windowWidth: target.scrollWidth || 816,
+      },
+      jsPDF: {
+        unit: "in" as const,
+        format: "letter" as const,
+        orientation: "portrait" as const,
+      },
+      pagebreak: { mode: ["css", "legacy"] as const },
+    };
+
+    await html2pdf().set(opt).from(target).save();
+    toast.success("PDF downloaded.");
+  } finally {
+    iframe.remove();
+  }
+}
+
 export function OutputPanel({ html, keywords, audit }: Props) {
   const [copied, setCopied] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   if (!html && !keywords) {
     return (
@@ -57,7 +163,7 @@ export function OutputPanel({ html, keywords, audit }: Props) {
           <TabsTrigger value="audit">Audit</TabsTrigger>
         </TabsList>
         {html ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
@@ -71,9 +177,34 @@ export function OutputPanel({ html, keywords, audit }: Props) {
               {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
               Copy HTML
             </Button>
-            <Button type="button" variant="paper" size="sm" onClick={() => downloadHtml(html)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => downloadHtml(html)}>
               <Download className="size-3.5" />
-              Download
+              HTML
+            </Button>
+            <Button
+              type="button"
+              variant="paper"
+              size="sm"
+              disabled={pdfBusy}
+              onClick={async () => {
+                setPdfBusy(true);
+                try {
+                  await downloadPdf(html);
+                } catch (err) {
+                  const message =
+                    err instanceof Error ? err.message : "Could not create PDF.";
+                  toast.error(message);
+                } finally {
+                  setPdfBusy(false);
+                }
+              }}
+            >
+              {pdfBusy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <FileDown className="size-3.5" />
+              )}
+              {pdfBusy ? "PDF…" : "PDF"}
             </Button>
           </div>
         ) : null}
