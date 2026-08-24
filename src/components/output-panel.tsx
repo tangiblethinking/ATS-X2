@@ -42,7 +42,6 @@ function loadHtml2Pdf(): Promise<Html2PdfFn> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("PDF export requires a browser."));
   }
-  // Already loaded globally by a previous call
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const existing = (window as any).html2pdf as Html2PdfFn | undefined;
   if (typeof existing === "function") {
@@ -70,68 +69,128 @@ function loadHtml2Pdf(): Promise<Html2PdfFn> {
   return html2pdfLoader;
 }
 
+/** Pull style tags + body markup from a full HTML document string. */
+function parseResumeDocument(html: string): { styles: string; bodyHtml: string } {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  const styleParts: string[] = [];
+  doc.querySelectorAll("style").forEach((el) => {
+    styleParts.push(el.textContent ?? "");
+  });
+  // Linked stylesheets cannot be fetched cross-origin; inline any that are data: or same-origin later if needed.
+
+  const body = doc.body;
+  const bodyHtml = body ? body.innerHTML : html;
+
+  // Preserve body class/style so layout wrappers still work
+  const bodyClass = body?.getAttribute("class") ?? "";
+  const bodyStyle = body?.getAttribute("style") ?? "";
+
+  return {
+    styles: styleParts.join("\n"),
+    bodyHtml:
+      bodyClass || bodyStyle
+        ? `<div class="${bodyClass}" style="${bodyStyle}">${bodyHtml}</div>`
+        : bodyHtml,
+  };
+}
+
 /**
- * Render the full resume HTML document in a temporary off-screen iframe
- * so all embedded <style> / layout rules apply, then snapshot to PDF.
+ * Mount the resume (styles + markup) into the *main* document so html2canvas
+ * can clone it with CSS intact, then export to a letter PDF.
+ *
+ * html2pdf clones the target into the parent document; targeting an iframe
+ * body loses the iframe's stylesheets and only captures fragments.
  */
 async function downloadPdf(html: string) {
   const html2pdf = await loadHtml2Pdf();
+  const { styles, bodyHtml } = parseResumeDocument(html);
 
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.cssText =
-    "position:fixed;left:-9999px;top:0;width:816px;height:1056px;border:0;opacity:0;pointer-events:none;";
-  document.body.appendChild(iframe);
+  // Letter width at 96dpi ≈ 816px; height grows with content
+  const host = document.createElement("div");
+  host.id = "ats-pdf-export-host";
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = [
+    "position:fixed",
+    "left:0",
+    "top:0",
+    "width:816px",
+    "max-width:816px",
+    "margin:0",
+    "padding:0",
+    "background:#ffffff",
+    "color:#000000",
+    "z-index:-1",
+    "opacity:0.01",
+    "pointer-events:none",
+    "overflow:visible",
+  ].join(";");
+
+  const styleEl = document.createElement("style");
+  styleEl.textContent = `
+    #ats-pdf-export-host, #ats-pdf-export-host * {
+      box-sizing: border-box;
+    }
+    #ats-pdf-export-host {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+    ${styles}
+  `;
+
+  const content = document.createElement("div");
+  content.id = "ats-pdf-export-content";
+  content.innerHTML = bodyHtml;
+
+  host.appendChild(styleEl);
+  host.appendChild(content);
+  document.body.appendChild(host);
 
   try {
-    const doc = iframe.contentDocument;
-    if (!doc) {
-      throw new Error("Could not create print frame.");
-    }
+    // Let layout / webfonts settle
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    await new Promise<void>((r) => window.setTimeout(r, 300));
 
-    doc.open();
-    doc.write(html);
-    doc.close();
+    // Measure actual content height so multi-page resumes are fully captured
+    const measuredHeight = Math.max(
+      content.scrollHeight,
+      content.offsetHeight,
+      host.scrollHeight,
+      1056,
+    );
+    host.style.height = `${measuredHeight}px`;
 
-    // Wait for styles, fonts, and images inside the resume document
-    await new Promise<void>((resolve) => {
-      const done = () => resolve();
-      if (doc.readyState === "complete") {
-        window.setTimeout(done, 150);
-      } else {
-        iframe.onload = () => window.setTimeout(done, 150);
-        window.setTimeout(done, 2000); // safety
-      }
-    });
-
-    // Prefer body; fall back to documentElement if body is empty
-    const target =
-      doc.body && doc.body.childNodes.length > 0 ? doc.body : doc.documentElement;
-
-    // Letter size; scale 2 for sharper text; preserve resume CSS via iframe DOM
     const opt = {
-      margin: [0.4, 0.4, 0.4, 0.4] as [number, number, number, number],
+      margin: [0.35, 0.35, 0.35, 0.35] as [number, number, number, number],
       filename: "resume-ats.pdf",
       image: { type: "jpeg" as const, quality: 0.98 },
       html2canvas: {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: "#ffffff",
-        windowWidth: target.scrollWidth || 816,
+        width: 816,
+        windowWidth: 816,
+        height: measuredHeight,
+        windowHeight: measuredHeight,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
       },
       jsPDF: {
         unit: "in" as const,
         format: "letter" as const,
         orientation: "portrait" as const,
       },
-      pagebreak: { mode: ["css", "legacy"] as const },
+      pagebreak: { mode: ["avoid-all", "css", "legacy"] as const },
     };
 
-    await html2pdf().set(opt).from(target).save();
+    await html2pdf().set(opt).from(content).save();
     toast.success("PDF downloaded.");
   } finally {
-    iframe.remove();
+    host.remove();
   }
 }
 
