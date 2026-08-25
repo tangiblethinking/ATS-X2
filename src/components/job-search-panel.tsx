@@ -45,6 +45,7 @@ type Props = {
   resumeHtml: string;
   setResumeHtml: (v: string) => void;
   apiKey: string;
+  searchApiKey: string;
   running: boolean;
   onSendToInputs: (job: JobResult) => void;
   onPickFile: (file: File | undefined) => void;
@@ -54,6 +55,7 @@ export function JobSearchPanel({
   resumeHtml,
   setResumeHtml,
   apiKey,
+  searchApiKey,
   running,
   onSendToInputs,
   onPickFile,
@@ -74,15 +76,10 @@ export function JobSearchPanel({
     }
     const sorted = [...list].sort((a, b) => {
       let cmp = 0;
-      if (sortKey === "date") {
-        cmp = (a.postedAtMs ?? 0) - (b.postedAtMs ?? 0);
-      } else if (sortKey === "title") {
-        cmp = a.title.localeCompare(b.title);
-      } else if (sortKey === "portal") {
-        cmp = a.portal.localeCompare(b.portal);
-      } else if (sortKey === "salary") {
-        cmp = salarySortValue(a.salary) - salarySortValue(b.salary);
-      }
+      if (sortKey === "date") cmp = (a.postedAtMs ?? 0) - (b.postedAtMs ?? 0);
+      else if (sortKey === "title") cmp = a.title.localeCompare(b.title);
+      else if (sortKey === "portal") cmp = a.portal.localeCompare(b.portal);
+      else if (sortKey === "salary") cmp = salarySortValue(a.salary) - salarySortValue(b.salary);
       return sortAsc ? cmp : -cmp;
     });
     return sorted;
@@ -114,29 +111,24 @@ export function JobSearchPanel({
       toast.error("Detect or enter a job title first.");
       return;
     }
-    if (!isPlausibleApiKey(apiKey)) {
-      toast.error("Save a Google API key in the header first (Custom Search + Gemini)."
-      );
+    if (!isPlausibleApiKey(searchApiKey)) {
+      toast.error("Save a Custom Search API key in the header first (API keys → Custom Search).");
       return;
     }
     setSearching(true);
     setResults([]);
     try {
       const res = await searchAtsJobs({
-        data: { title, apiKey: apiKey || undefined },
+        data: { title, apiKey: searchApiKey || undefined },
       });
       if (!res.ok) {
         toast.error("Search failed.");
         return;
       }
       setResults(res.results);
-      for (const e of res.errors) {
-        toast.error(e);
-      }
+      for (const e of res.errors) toast.error(e);
       if (res.results.length === 0) {
-        toast.message(
-          "No recent listings found for that title on the four ATS portals.",
-        );
+        toast.message("No recent listings found for that title on the four ATS portals.");
       } else {
         toast.success(
           `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} via Google Search.`,
@@ -164,12 +156,10 @@ export function JobSearchPanel({
           Search Direct ATS job boards
         </h1>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-          Uses Google Custom Search for the same style of results as searching{" "}
-          <code className="rounded bg-muted px-1 text-[11px]">
-            "title" site:workable.com
-          </code>{" "}
-          — across Workable, Greenhouse, Lever, and Dover. Requires your Google
-          API key (Custom Search API enabled).
+          Uses Google Custom Search for queries like{" "}
+          <code className="rounded bg-muted px-1 text-[11px]">"title" site:workable.com</code>
+          {" "}across Workable, Greenhouse, Lever, and Dover. Requires a Custom
+          Search API key (API keys in the header).
         </p>
       </section>
 
@@ -181,34 +171,15 @@ export function JobSearchPanel({
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="search-resume">Resume HTML</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-9"
-                disabled={searching}
-                onClick={() => fileRef.current?.click()}
-              >
-                <FileCode2 className="size-3.5" />
-                Load .html
+              <Button type="button" variant="ghost" size="sm" className="h-9" disabled={searching} onClick={() => fileRef.current?.click()}>
+                <FileCode2 className="size-3.5" /> Load .html
               </Button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".html,.htm,text/html"
-                className="hidden"
-                onChange={(e) => {
-                  void onPickFile(e.target.files?.[0]);
-                  e.target.value = "";
-                }}
-              />
+              <input ref={fileRef} type="file" accept=".html,.htm,text/html" className="hidden" onChange={(e) => { void onPickFile(e.target.files?.[0]); e.target.value = ""; }} />
             </div>
             <Textarea
               id="search-resume"
               value={resumeHtml}
-              onChange={(e) =>
-                setResumeHtml(e.target.value.slice(0, MAX_RESUME_CHARS))
-              }
+              onChange={(e) => setResumeHtml(e.target.value.slice(0, MAX_RESUME_CHARS))}
               disabled={searching}
               className="min-h-32 font-mono text-xs leading-relaxed"
               placeholder="Paste or load the HTML resume used for title detection."
@@ -216,9 +187,7 @@ export function JobSearchPanel({
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <div className="flex flex-1 flex-col gap-2">
-              <Label htmlFor="job-title">
-                Job title (from first experience section)
-              </Label>
+              <Label htmlFor="job-title">Job title (from first experience section)</Label>
               <Input
                 id="job-title"
                 value={titleOverride}
@@ -227,39 +196,21 @@ export function JobSearchPanel({
                 disabled={searching}
               />
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 shrink-0"
-              disabled={searching || resumeHtml.trim().length < 40}
-              onClick={() => void detectTitle()}
-            >
+            <Button type="button" variant="outline" className="h-10 shrink-0" disabled={searching || resumeHtml.trim().length < 40} onClick={() => void detectTitle()}>
               Detect title
             </Button>
             <Button
               type="button"
               className="h-10 shrink-0"
-              disabled={
-                searching ||
-                !(titleOverride || detectedTitle).trim() ||
-                !isPlausibleApiKey(apiKey)
-              }
+              disabled={searching || !(titleOverride || detectedTitle).trim() || !isPlausibleApiKey(searchApiKey)}
               onClick={() => void runSearch()}
             >
-              {searching ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Search className="size-4" />
-              )}
+              {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
               {searching ? "Searching…" : "Search portals"}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Engine: Google Custom Search (cx=37b3de50b6cb24ae5). Queries like{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-              "product designer" site:workable.com
-            </code>
-            . Pre-filter: ≤ 1 week when dated.
+            Engine: Google Custom Search (cx=37b3de50b6cb24ae5). Pre-filter: ≤ 1 week when dated.
           </p>
         </CardContent>
       </Card>
@@ -277,15 +228,12 @@ export function JobSearchPanel({
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Filter className="size-3.5" />
-                Portal
+                <Filter className="size-3.5" /> Portal
               </div>
               <select
                 className="h-9 rounded-lg border border-border bg-background px-2 text-sm"
                 value={portalFilter}
-                onChange={(e) =>
-                  setPortalFilter(e.target.value as JobPortal | "all")
-                }
+                onChange={(e) => setPortalFilter(e.target.value as JobPortal | "all")}
               >
                 <option value="all">All</option>
                 <option value="workable">Workable</option>
@@ -294,105 +242,44 @@ export function JobSearchPanel({
                 <option value="dover">Dover</option>
               </select>
               <div className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <ArrowUpDown className="size-3.5" />
-                Sort
+                <ArrowUpDown className="size-3.5" /> Sort
               </div>
-              {(
-                [
-                  ["date", "Date"],
-                  ["title", "Title"],
-                  ["salary", "Salary"],
-                  ["portal", "Portal"],
-                ] as const
-              ).map(([key, label]) => (
-                <Button
-                  key={key}
-                  type="button"
-                  variant={sortKey === key ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => toggleSort(key)}
-                >
-                  {label}
-                  {sortKey === key ? (sortAsc ? " ↑" : " ↓") : ""}
+              {([["date", "Date"], ["title", "Title"], ["salary", "Salary"], ["portal", "Portal"]] as const).map(([key, label]) => (
+                <Button key={key} type="button" variant={sortKey === key ? "secondary" : "ghost"} size="sm" className="h-8 text-xs" onClick={() => toggleSort(key)}>
+                  {label}{sortKey === key ? (sortAsc ? " ↑" : " ↓") : ""}
                 </Button>
               ))}
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {searching && results.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                Searching Workable, Greenhouse, Lever, and Dover via Google…
-              </p>
+              <p className="py-8 text-center text-sm text-muted-foreground">Searching Workable, Greenhouse, Lever, and Dover via Google…</p>
             ) : filteredSorted.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No results match the current filter.
-              </p>
+              <p className="py-8 text-center text-sm text-muted-foreground">No results match the current filter.</p>
             ) : (
               filteredSorted.map((job) => (
-                <div
-                  key={job.id}
-                  className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-start sm:justify-between"
-                >
+                <div key={job.id} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={job.applicationUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-medium text-foreground hover:underline"
-                      >
-                        {job.title}
-                      </a>
-                      <Badge variant="outline" className="text-[11px]">
-                        {PORTAL_LABEL[job.portal]}
-                      </Badge>
+                      <a href={job.applicationUrl} target="_blank" rel="noreferrer" className="font-medium text-foreground hover:underline">{job.title}</a>
+                      <Badge variant="outline" className="text-[11px]">{PORTAL_LABEL[job.portal]}</Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      {job.company}
-                      {job.location && job.location !== "—"
-                        ? ` · ${job.location}`
-                        : ""}
+                      {job.company}{job.location && job.location !== "—" ? ` · ${job.location}` : ""}
                     </p>
-                    <p className="line-clamp-2 text-sm text-muted-foreground">
-                      {job.summary}
-                    </p>
+                    <p className="line-clamp-2 text-sm text-muted-foreground">{job.summary}</p>
                     <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      <span>
-                        {job.postedAt
-                          ? `Posted ${job.postedAt}`
-                          : "Date unknown"}
-                      </span>
-                      <span>
-                        {job.salary ? job.salary : "Salary not listed"}
-                      </span>
+                      <span>{job.postedAt ? `Posted ${job.postedAt}` : "Date unknown"}</span>
+                      <span>{job.salary ? job.salary : "Salary not listed"}</span>
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-row gap-2 sm:flex-col">
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="h-9"
-                      disabled={running || !isPlausibleApiKey(apiKey)}
-                      onClick={() => onSendToInputs(job)}
-                    >
-                      <Send className="size-3.5" />
-                      Send to inputs
+                    <Button type="button" size="sm" className="h-9" disabled={running || !isPlausibleApiKey(apiKey)} onClick={() => onSendToInputs(job)}>
+                      <Send className="size-3.5" /> Send to inputs
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9"
-                      asChild
-                    >
-                      <a
-                        href={job.applicationUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <ExternalLink className="size-3.5" />
-                        Open
+                    <Button type="button" variant="outline" size="sm" className="h-9" asChild>
+                      <a href={job.applicationUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink className="size-3.5" /> Open
                       </a>
                     </Button>
                   </div>
