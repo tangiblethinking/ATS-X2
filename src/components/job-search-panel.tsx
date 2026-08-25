@@ -114,10 +114,17 @@ export function JobSearchPanel({
       toast.error("Detect or enter a job title first.");
       return;
     }
+    if (!isPlausibleApiKey(apiKey)) {
+      toast.error("Save a Google API key in the header first (Custom Search + Gemini)."
+      );
+      return;
+    }
     setSearching(true);
     setResults([]);
     try {
-      const res = await searchAtsJobs({ data: { title } });
+      const res = await searchAtsJobs({
+        data: { title, apiKey: apiKey || undefined },
+      });
       if (!res.ok) {
         toast.error("Search failed.");
         return;
@@ -132,7 +139,7 @@ export function JobSearchPanel({
         );
       } else {
         toast.success(
-          `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} (≤ 1 week when dated).`,
+          `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} via Google Search.`,
         );
       }
     } catch (err) {
@@ -157,10 +164,12 @@ export function JobSearchPanel({
           Search Direct ATS job boards
         </h1>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-          Scan your resume for the most recent job title, then search Workable,
-          Greenhouse, Lever, and Dover in parallel. Results older than one week
-          are removed when a date is available. Send any listing straight into
-          the alignment pipeline.
+          Uses Google Custom Search for the same style of results as searching{" "}
+          <code className="rounded bg-muted px-1 text-[11px]">
+            "title" site:workable.com
+          </code>{" "}
+          — across Workable, Greenhouse, Lever, and Dover. Requires your Google
+          API key (Custom Search API enabled).
         </p>
       </section>
 
@@ -230,7 +239,11 @@ export function JobSearchPanel({
             <Button
               type="button"
               className="h-10 shrink-0"
-              disabled={searching || !(titleOverride || detectedTitle).trim()}
+              disabled={
+                searching ||
+                !(titleOverride || detectedTitle).trim() ||
+                !isPlausibleApiKey(apiKey)
+              }
               onClick={() => void runSearch()}
             >
               {searching ? (
@@ -242,11 +255,11 @@ export function JobSearchPanel({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Independent site-scoped searches:{" "}
+            Engine: Google Custom Search (cx=37b3de50b6cb24ae5). Queries like{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-              "title" site:workable.com
+              "product designer" site:workable.com
             </code>
-            , greenhouse, lever, dover. Pre-filter: ≤ 1 week when dated.
+            . Pre-filter: ≤ 1 week when dated.
           </p>
         </CardContent>
       </Card>
@@ -309,7 +322,7 @@ export function JobSearchPanel({
           <CardContent className="flex flex-col gap-3">
             {searching && results.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Searching Workable, Greenhouse, Lever, and Dover…
+                Searching Workable, Greenhouse, Lever, and Dover via Google…
               </p>
             ) : filteredSorted.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
