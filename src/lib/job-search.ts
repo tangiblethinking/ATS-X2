@@ -43,9 +43,7 @@ const PORTALS: {
   { id: "dover", label: "Dover", site: "dover.com", hostHint: /dover\.com/i },
 ];
 
-/** Programmable Search Engine ID (cx from CSE control panel / embed snippet). */
 const GOOGLE_CSE_CX = "37b3de50b6cb24ae5";
-
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const BROWSER_HEADERS: Record<string, string> = {
@@ -77,9 +75,7 @@ export function extractMostRecentJobTitle(html: string): string | null {
     /(?:professional\s+)?experience|work\s+history|employment\s+history|career\s+history/i,
   );
   let slice = text;
-  if (expMatch && expMatch.index != null) {
-    slice = text.slice(expMatch.index, expMatch.index + 2500);
-  }
+  if (expMatch && expMatch.index != null) slice = text.slice(expMatch.index, expMatch.index + 2500);
   const patterns = [
     /(?:^|\n)\s*([A-Z][A-Za-z0-9+/&\- ]{2,60}?(?:Designer|Engineer|Manager|Director|Lead|Specialist|Analyst|Developer|Architect|Consultant|Officer|Coordinator|Associate|Intern|Writer|Researcher|Scientist|Product|Marketing|Sales|Operations|HR|Finance|Legal|Support)[A-Za-z0-9+/&\- ]{0,40})\s*(?:\n|\||–|—|-|at\s)/m,
     /(?:experience|history)[^\n]{0,80}\n+\s*([A-Z][^\n|]{4,70})/i,
@@ -89,9 +85,7 @@ export function extractMostRecentJobTitle(html: string): string | null {
     const m = slice.match(re);
     if (m?.[1]) {
       const title = m[1].replace(/\s+/g, " ").trim();
-      if (title.length >= 4 && title.length <= 80 && !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(title)) {
-        return title;
-      }
+      if (title.length >= 4 && title.length <= 80 && !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(title)) return title;
     }
   }
   const lower = html.toLowerCase();
@@ -184,7 +178,6 @@ async function searchPortalGoogleCse(
   url.searchParams.set("q", q);
   url.searchParams.set("num", "10");
   url.searchParams.set("dateRestrict", "w1");
-
   try {
     const res = await fetch(url.toString(), {
       signal: AbortSignal.timeout(14000),
@@ -201,11 +194,7 @@ async function searchPortalGoogleCse(
     const items = body.items ?? [];
     const hits: ParsedHit[] = items
       .filter((it) => it.link && portal.hostHint.test(it.link))
-      .map((it) => ({
-        title: it.title ?? "Untitled",
-        href: it.link!,
-        summary: it.snippet ?? "",
-      }));
+      .map((it) => ({ title: it.title ?? "Untitled", href: it.link!, summary: it.snippet ?? "" }));
     return { portal: portal.id, results: filterRecent(hits.map((h) => hitToJob(h, portal.id))) };
   } catch (err) {
     const message = err instanceof Error ? err.message : "CSE failed";
@@ -245,20 +234,30 @@ async function searchPortalBingFallback(
   title: string,
   portal: (typeof PORTALS)[number],
 ): Promise<{ portal: JobPortal; results: JobResult[]; error?: string }> {
-  const q = encodeURIComponent(`"${title}" site:${portal.site}`);
-  const url = `https://www.bing.com/search?q=${q}&count=20&setlang=en-US&cc=US`;
-  try {
+  const queries = [`"${title}" site:${portal.site}`, `${title} site:${portal.site}`];
+  const tryOnce = async (q: string) => {
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20&setlang=en-US&cc=US`;
     const res = await fetch(url, {
       redirect: "follow",
-      headers: BROWSER_HEADERS,
+      headers: { ...BROWSER_HEADERS, Referer: "https://www.bing.com/" },
       signal: AbortSignal.timeout(14000),
     });
-    if (!res.ok) {
-      return { portal: portal.id, results: [], error: `${portal.label}: Bing HTTP ${res.status}` };
-    }
+    if (!res.ok) return { ok: false as const, status: res.status, results: [] as JobResult[] };
     const html = await res.text();
     const hits = parseBingHtml(html).filter((h) => portal.hostHint.test(h.href));
-    return { portal: portal.id, results: filterRecent(hits.map((h) => hitToJob(h, portal.id))) };
+    return { ok: true as const, status: res.status, results: filterRecent(hits.map((h) => hitToJob(h, portal.id))) };
+  };
+  try {
+    let lastStatus = 0;
+    for (const q of queries) {
+      const r = await tryOnce(q);
+      lastStatus = r.status;
+      if (r.results.length > 0) return { portal: portal.id, results: r.results };
+    }
+    if (lastStatus && lastStatus >= 400) {
+      return { portal: portal.id, results: [], error: `${portal.label}: Bing HTTP ${lastStatus}` };
+    }
+    return { portal: portal.id, results: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Bing failed";
     return { portal: portal.id, results: [], error: `${portal.label}: ${message}` };
@@ -289,26 +288,54 @@ export const searchAtsJobs = createServerFn({ method: "POST" })
     const title = data.title.trim();
     const apiKey = data.apiKey?.trim();
 
-    const settled = await Promise.all(
-      PORTALS.map((p) =>
-        apiKey ? searchPortalGoogleCse(title, p, apiKey) : searchPortalBingFallback(title, p),
-      ),
-    );
-
     const errors: string[] = [];
     const all: JobResult[] = [];
-    for (const s of settled) {
-      if (s.error && s.results.length === 0) errors.push(s.error);
-      all.push(...s.results);
-    }
+    let engine: "google-cse" | "bing" | "mixed" = apiKey ? "google-cse" : "bing";
+    let cseAccessDenied = false;
 
-    if (apiKey && all.length === 0) {
-      const fallback = await Promise.all(PORTALS.map((p) => searchPortalBingFallback(title, p)));
-      for (const s of fallback) {
-        if (s.error && s.results.length === 0) errors.push(s.error);
+    if (apiKey) {
+      const cse = await Promise.all(PORTALS.map((p) => searchPortalGoogleCse(title, p, apiKey)));
+      for (const s of cse) {
         all.push(...s.results);
+        if (s.error && s.results.length === 0) {
+          const low = s.error.toLowerCase();
+          if (
+            low.includes("does not have the access to custom search") ||
+            low.includes("custom search json api") ||
+            low.includes("has not been used") ||
+            low.includes("is disabled") ||
+            low.includes("accessnotconfigured") ||
+            low.includes("permission denied")
+          ) {
+            cseAccessDenied = true;
+          } else {
+            errors.push(s.error);
+          }
+        }
       }
     }
+
+    if (all.length === 0) {
+      if (cseAccessDenied) {
+        errors.push(
+          "Custom Search JSON API is not enabled on this key's Google Cloud project. Enable it: APIs & Services → Library → Custom Search API. AI Studio-only keys often cannot call Custom Search — use a Cloud Console key. Falling back to Bing…",
+        );
+      }
+      const fallback = await Promise.all(PORTALS.map((p) => searchPortalBingFallback(title, p)));
+      for (const s of fallback) {
+        all.push(...s.results);
+        if (s.error && s.results.length === 0) errors.push(s.error);
+      }
+      engine = apiKey ? "mixed" : "bing";
+    }
+
+    const seenErr = new Set<string>();
+    const uniqueErrors = errors.filter((e) => {
+      const key = e.replace(/^(Workable|Greenhouse|Lever|Dover):\s*/i, "").toLowerCase();
+      if (seenErr.has(key)) return false;
+      seenErr.add(key);
+      return true;
+    });
 
     const seen = new Set<string>();
     const unique = all.filter((r) => {
@@ -323,8 +350,9 @@ export const searchAtsJobs = createServerFn({ method: "POST" })
       ok: true as const,
       title,
       results: unique,
-      errors,
-      engine: apiKey ? ("google-cse" as const) : ("bing" as const),
+      errors: uniqueErrors,
+      engine,
+      cseAccessDenied,
       searchedAt: new Date().toISOString(),
     };
   });
