@@ -12,7 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { isPlausibleApiKey, readStoredApiKey } from "@/lib/api-key-store";
+import {
+  isPlausibleApiKey,
+  readStoredApiKey,
+  readStoredSearchApiKey,
+} from "@/lib/api-key-store";
 import { looksLikeHtml } from "@/lib/html-clean";
 import {
   auditKeywords,
@@ -43,18 +47,11 @@ const idleStatuses = (): Record<StepId, StepStatus> => ({
   6: "idle",
 });
 
-type Draft = {
-  jobUrl: string;
-  jobText: string;
-  resumeHtml: string;
-};
-
+type Draft = { jobUrl: string; jobText: string; resumeHtml: string };
 type Theme = "dark" | "light";
 
 function readDraft(): Draft {
-  if (typeof window === "undefined") {
-    return { jobUrl: "", jobText: "", resumeHtml: "" };
-  }
+  if (typeof window === "undefined") return { jobUrl: "", jobText: "", resumeHtml: "" };
   try {
     const raw = window.localStorage.getItem(DRAFT_STORAGE);
     if (!raw) return { jobUrl: "", jobText: "", resumeHtml: "" };
@@ -91,6 +88,7 @@ function applyTheme(theme: Theme) {
 
 export function HomePage() {
   const [apiKey, setApiKey] = useState("");
+  const [searchApiKey, setSearchApiKey] = useState("");
   const [jobUrl, setJobUrl] = useState("");
   const [jobText, setJobText] = useState("");
   const [resumeHtml, setResumeHtml] = useState("");
@@ -107,6 +105,7 @@ export function HomePage() {
 
   useEffect(() => {
     setApiKey(readStoredApiKey());
+    setSearchApiKey(readStoredSearchApiKey());
     const draft = readDraft();
     setJobUrl(draft.jobUrl);
     setJobText(draft.jobText);
@@ -125,7 +124,7 @@ export function HomePage() {
         JSON.stringify({ jobUrl, jobText, resumeHtml } satisfies Draft),
       );
     } catch {
-      // quota — ignore
+      // quota
     }
   }, [hydrated, jobUrl, jobText, resumeHtml]);
 
@@ -169,7 +168,7 @@ export function HomePage() {
   async function runPipeline(opts?: { url?: string; skipResetUrl?: boolean }) {
     const urlToUse = (opts?.url ?? jobUrl).trim();
     if (!isPlausibleApiKey(apiKey)) {
-      toast.error("Save an API key first.");
+      toast.error("Save a Gemini API key first.");
       return;
     }
     if (!looksLikeHtml(resumeHtml)) {
@@ -180,10 +179,7 @@ export function HomePage() {
       toast.error("Enter a valid job description URL.");
       return;
     }
-
-    if (opts?.skipResetUrl) {
-      setJobUrl(urlToUse);
-    }
+    if (opts?.skipResetUrl) setJobUrl(urlToUse);
 
     setRunning(true);
     resetPipeline();
@@ -206,17 +202,14 @@ export function HomePage() {
         return;
       }
 
-      const extracted = await extractKeywords({
-        data: { apiKey, jobText: currentJob },
-      });
+      const extracted = await extractKeywords({ data: { apiKey, jobText: currentJob } });
       if (!extracted.ok) {
         fail(1, extracted.error);
         return;
       }
       currentKeywords = extracted.keywords;
       setKeywords(currentKeywords);
-      const kwCount =
-        currentKeywords.keywords.length + currentKeywords.phrases.length;
+      const kwCount = currentKeywords.keywords.length + currentKeywords.phrases.length;
       mark(1, "done", `${kwCount} keywords and phrases`);
 
       mark(2, "running");
@@ -231,9 +224,7 @@ export function HomePage() {
       mark(2, "done", "Full resume rewritten");
 
       mark(3, "running");
-      const grammar = await grammarCheck({
-        data: { apiKey, resumeHtml: currentHtml },
-      });
+      const grammar = await grammarCheck({ data: { apiKey, resumeHtml: currentHtml } });
       if (!grammar.ok) {
         fail(3, grammar.error);
         return;
@@ -251,13 +242,7 @@ export function HomePage() {
       }
       currentHtml = audited.html;
       setAudit(audited.audit);
-      mark(
-        4,
-        "done",
-        audited.audit.flags.length
-          ? `${audited.audit.flags.length} issues fixed`
-          : "No stuffing found",
-      );
+      mark(4, "done", audited.audit.flags.length ? `${audited.audit.flags.length} issues fixed` : "No stuffing found");
 
       mark(5, "running");
       const laidOut = await lockLayout({
@@ -271,15 +256,12 @@ export function HomePage() {
       mark(5, "done", "Original layout restored");
 
       mark(6, "running");
-      const cleaned = await cleanHtml({
-        data: { originalHtml: original, currentHtml },
-      });
+      const cleaned = await cleanHtml({ data: { originalHtml: original, currentHtml } });
       setFinalHtml(cleaned.html);
       mark(6, "done", "Full clean HTML ready");
       toast.success("Pipeline finished.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "The pipeline failed.";
-      toast.error(message);
+      toast.error(err instanceof Error ? err.message : "The pipeline failed.");
     } finally {
       setRunning(false);
     }
@@ -312,25 +294,15 @@ export function HomePage() {
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-4">
               <div className="flex min-w-0 items-baseline gap-3">
-                <p className="font-display text-xl font-medium tracking-tight">
-                  ATS Align
-                </p>
+                <p className="font-display text-xl font-medium tracking-tight">ATS Align</p>
                 <p className="hidden truncate text-sm text-muted-foreground sm:block">
                   Resume to job · search & align
                 </p>
               </div>
-              <Tabs
-                value={mode}
-                onValueChange={(v) => setMode(v as "pipeline" | "search")}
-                className="hidden sm:block"
-              >
+              <Tabs value={mode} onValueChange={(v) => setMode(v as "pipeline" | "search")} className="hidden sm:block">
                 <TabsList className="h-9">
-                  <TabsTrigger value="pipeline" className="px-3 text-xs sm:text-sm">
-                    Pipeline
-                  </TabsTrigger>
-                  <TabsTrigger value="search" className="px-3 text-xs sm:text-sm">
-                    Job Search
-                  </TabsTrigger>
+                  <TabsTrigger value="pipeline" className="px-3 text-xs sm:text-sm">Pipeline</TabsTrigger>
+                  <TabsTrigger value="search" className="px-3 text-xs sm:text-sm">Job Search</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -341,31 +313,23 @@ export function HomePage() {
                 size="sm"
                 className="h-9 w-9 p-0"
                 onClick={toggleTheme}
-                aria-label={
-                  theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
-                }
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               >
-                {theme === "dark" ? (
-                  <Sun className="size-4" />
-                ) : (
-                  <Moon className="size-4" />
-                )}
+                {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
               </Button>
-              <ApiKeyDialog apiKey={apiKey} onChange={setApiKey} />
+              <ApiKeyDialog
+                apiKey={apiKey}
+                onChange={setApiKey}
+                searchApiKey={searchApiKey}
+                onSearchChange={setSearchApiKey}
+              />
             </div>
           </div>
           <div className="border-t border-border px-4 py-2 sm:hidden">
-            <Tabs
-              value={mode}
-              onValueChange={(v) => setMode(v as "pipeline" | "search")}
-            >
+            <Tabs value={mode} onValueChange={(v) => setMode(v as "pipeline" | "search")}>
               <TabsList className="h-9 w-full">
-                <TabsTrigger value="pipeline" className="flex-1 text-xs">
-                  Pipeline
-                </TabsTrigger>
-                <TabsTrigger value="search" className="flex-1 text-xs">
-                  Job Search
-                </TabsTrigger>
+                <TabsTrigger value="pipeline" className="flex-1 text-xs">Pipeline</TabsTrigger>
+                <TabsTrigger value="search" className="flex-1 text-xs">Job Search</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -379,9 +343,9 @@ export function HomePage() {
                   Align the resume you already have to the job you want.
                 </h1>
                 <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-                  Paste a job URL and the HTML of your resume. The pipeline extracts
-                  ATS keywords, rewrites the whole document, checks grammar, audits
-                  stuffing, locks your original layout, and returns clean HTML.
+                  Paste a job URL and the HTML of your resume. The pipeline extracts ATS keywords,
+                  rewrites the whole document, checks grammar, audits stuffing, locks your original
+                  layout, and returns clean HTML.
                 </p>
               </section>
 
@@ -393,99 +357,39 @@ export function HomePage() {
                   <CardContent className="flex flex-col gap-5">
                     <div className="flex flex-col gap-2">
                       <Label htmlFor="job-url">Job description URL</Label>
-                      <Input
-                        id="job-url"
-                        type="url"
-                        inputMode="url"
-                        placeholder="https://…"
-                        value={jobUrl}
-                        onChange={(e) => setJobUrl(e.target.value)}
-                        disabled={running}
-                      />
+                      <Input id="job-url" type="url" inputMode="url" placeholder="https://…" value={jobUrl} onChange={(e) => setJobUrl(e.target.value)} disabled={running} />
                     </div>
                     <div className="flex flex-col gap-2">
                       <Label htmlFor="job-text">
                         Job description text
-                        <span className="ml-2 font-normal text-muted-foreground">
-                          used if the URL is blocked
-                        </span>
+                        <span className="ml-2 font-normal text-muted-foreground">used if the URL is blocked</span>
                       </Label>
-                      <Textarea
-                        id="job-text"
-                        value={jobText}
-                        onChange={(e) =>
-                          setJobText(e.target.value.slice(0, MAX_JOB_CHARS))
-                        }
-                        disabled={running}
-                        className="min-h-28"
-                        placeholder="Optional. Paste the posting if the page cannot be fetched."
-                      />
+                      <Textarea id="job-text" value={jobText} onChange={(e) => setJobText(e.target.value.slice(0, MAX_JOB_CHARS))} disabled={running} className="min-h-28" placeholder="Optional. Paste the posting if the page cannot be fetched." />
                     </div>
                     <div className="flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <Label htmlFor="resume-html">Resume HTML</Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-9"
-                          disabled={running}
-                          onClick={() => fileRef.current?.click()}
-                        >
-                          <FileCode2 className="size-3.5" />
-                          Load .html
+                        <Button type="button" variant="ghost" size="sm" className="h-9" disabled={running} onClick={() => fileRef.current?.click()}>
+                          <FileCode2 className="size-3.5" /> Load .html
                         </Button>
-                        <input
-                          ref={fileRef}
-                          type="file"
-                          accept=".html,.htm,text/html"
-                          className="hidden"
-                          onChange={(e) => {
-                            void onPickFile(e.target.files?.[0]);
-                            e.target.value = "";
-                          }}
-                        />
+                        <input ref={fileRef} type="file" accept=".html,.htm,text/html" className="hidden" onChange={(e) => { void onPickFile(e.target.files?.[0]); e.target.value = ""; }} />
                       </div>
-                      <Textarea
-                        id="resume-html"
-                        value={resumeHtml}
-                        onChange={(e) =>
-                          setResumeHtml(e.target.value.slice(0, MAX_RESUME_CHARS))
-                        }
-                        disabled={running}
-                        className="min-h-48 font-mono text-xs leading-relaxed"
-                        placeholder="Paste the full HTML of your resume, including style tags."
-                      />
+                      <Textarea id="resume-html" value={resumeHtml} onChange={(e) => setResumeHtml(e.target.value.slice(0, MAX_RESUME_CHARS))} disabled={running} className="min-h-48 font-mono text-xs leading-relaxed" placeholder="Paste the full HTML of your resume, including style tags." />
                       <p className="text-xs text-muted-foreground">
-                        {resumeHtml.length.toLocaleString()} /{" "}
-                        {MAX_RESUME_CHARS.toLocaleString()} characters
+                        {resumeHtml.length.toLocaleString()} / {MAX_RESUME_CHARS.toLocaleString()} characters
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <Button
-                        type="button"
-                        className="h-12 flex-1"
-                        disabled={!canRun}
-                        onClick={() => void runPipeline()}
-                      >
-                        <Play className="size-4" />
-                        {running ? "Running…" : "Run pipeline"}
+                      <Button type="button" className="h-12 flex-1" disabled={!canRun} onClick={() => void runPipeline()}>
+                        <Play className="size-4" /> {running ? "Running…" : "Run pipeline"}
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-12"
-                        disabled={running}
-                        onClick={resetPipeline}
-                      >
-                        <RotateCcw className="size-4" />
-                        Clear output
+                      <Button type="button" variant="outline" className="h-12" disabled={running} onClick={resetPipeline}>
+                        <RotateCcw className="size-4" /> Clear output
                       </Button>
                     </div>
                     {!apiKey ? (
                       <p className="text-xs text-muted-foreground">
-                        A Google AI Studio API key is required. Save one in the
-                        header before running.
+                        A Gemini API key is required. Save one under API keys in the header.
                       </p>
                     ) : null}
                   </CardContent>
@@ -493,21 +397,11 @@ export function HomePage() {
 
                 <Card>
                   <CardContent className="flex flex-col gap-6 p-4">
-                    <PipelineRail
-                      statuses={statuses}
-                      details={details}
-                      running={running}
-                    />
+                    <PipelineRail statuses={statuses} details={details} running={running} />
                     <div className="h-px bg-border" />
                     <div>
-                      <p className="mb-3 font-display text-lg font-medium leading-snug tracking-tight">
-                        Output
-                      </p>
-                      <OutputPanel
-                        html={finalHtml}
-                        keywords={keywords}
-                        audit={audit}
-                      />
+                      <p className="mb-3 font-display text-lg font-medium leading-snug tracking-tight">Output</p>
+                      <OutputPanel html={finalHtml} keywords={keywords} audit={audit} />
                     </div>
                   </CardContent>
                 </Card>
@@ -518,6 +412,7 @@ export function HomePage() {
               resumeHtml={resumeHtml}
               setResumeHtml={setResumeHtml}
               apiKey={apiKey}
+              searchApiKey={searchApiKey}
               running={running}
               onSendToInputs={sendToInputs}
               onPickFile={onPickFile}
