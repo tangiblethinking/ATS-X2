@@ -44,7 +44,9 @@ function salarySortValue(s: string | null): number {
 type Props = {
   resumeHtml: string;
   setResumeHtml: (v: string) => void;
+  /** Gemini key — Send to inputs / pipeline only */
   apiKey: string;
+  /** Custom Search key — Job Search only */
   searchApiKey: string;
   running: boolean;
   onSendToInputs: (job: JobResult) => void;
@@ -71,9 +73,7 @@ export function JobSearchPanel({
 
   const filteredSorted = useMemo(() => {
     let list = results;
-    if (portalFilter !== "all") {
-      list = list.filter((r) => r.portal === portalFilter);
-    }
+    if (portalFilter !== "all") list = list.filter((r) => r.portal === portalFilter);
     const sorted = [...list].sort((a, b) => {
       let cmp = 0;
       if (sortKey === "date") cmp = (a.postedAtMs ?? 0) - (b.postedAtMs ?? 0);
@@ -111,27 +111,37 @@ export function JobSearchPanel({
       toast.error("Detect or enter a job title first.");
       return;
     }
-    if (!isPlausibleApiKey(searchApiKey)) {
-      toast.error("Save a Custom Search API key in the header first (API keys → Custom Search).");
-      return;
-    }
+    // Job Search does NOT require a key when public fallback is enough,
+    // but if a Custom Search key is saved we use it first.
     setSearching(true);
     setResults([]);
     try {
       const res = await searchAtsJobs({
-        data: { title, apiKey: searchApiKey || undefined },
+        data: {
+          title,
+          searchApiKey: isPlausibleApiKey(searchApiKey) ? searchApiKey : undefined,
+        },
       });
       if (!res.ok) {
         toast.error("Search failed.");
         return;
       }
       setResults(res.results);
-      for (const e of res.errors) toast.error(e);
+      for (const e of res.errors) toast.error(e, { duration: 9000 });
+      if (res.keyHint) {
+        toast.message(`Job Search used Custom Search key ${res.keyHint}`);
+      }
       if (res.results.length === 0) {
         toast.message("No recent listings found for that title on the four ATS portals.");
       } else {
+        const via =
+          res.engine === "google-cse"
+            ? "Google Custom Search"
+            : res.engine === "mixed"
+              ? "public web search (CSE unavailable)"
+              : "public web search";
         toast.success(
-          `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} via Google Search.`,
+          `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} via ${via}.`,
         );
       }
     } catch (err) {
@@ -156,10 +166,9 @@ export function JobSearchPanel({
           Search Direct ATS job boards
         </h1>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-          Uses Google Custom Search for queries like{" "}
-          <code className="rounded bg-muted px-1 text-[11px]">"title" site:workable.com</code>
-          {" "}across Workable, Greenhouse, Lever, and Dover. Requires a Custom
-          Search API key (API keys in the header).
+          Searches Workable, Greenhouse, Lever, and Dover for your title. Uses your{" "}
+          <strong>Custom Search</strong> key when available; otherwise public web search.
+          The <strong>Gemini</strong> key is only for the Pipeline (rewrite).
         </p>
       </section>
 
@@ -202,7 +211,7 @@ export function JobSearchPanel({
             <Button
               type="button"
               className="h-10 shrink-0"
-              disabled={searching || !(titleOverride || detectedTitle).trim() || !isPlausibleApiKey(searchApiKey)}
+              disabled={searching || !(titleOverride || detectedTitle).trim()}
               onClick={() => void runSearch()}
             >
               {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
@@ -210,7 +219,8 @@ export function JobSearchPanel({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Engine: Google Custom Search (cx=37b3de50b6cb24ae5). Pre-filter: ≤ 1 week when dated.
+            Queries like <code className="rounded bg-muted px-1 py-0.5 text-[11px]">"product designer" site:workable.com</code>.
+            Pre-filter: ≤ 1 week when dated.
           </p>
         </CardContent>
       </Card>
@@ -253,7 +263,9 @@ export function JobSearchPanel({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {searching && results.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">Searching Workable, Greenhouse, Lever, and Dover via Google…</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Searching Workable, Greenhouse, Lever, and Dover…
+              </p>
             ) : filteredSorted.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">No results match the current filter.</p>
             ) : (
