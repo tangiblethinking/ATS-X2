@@ -26,181 +26,264 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   deleteApiKey,
+  deleteSearchApiKey,
   isPlausibleApiKey,
   maskApiKey,
   saveApiKey,
+  saveSearchApiKey,
 } from "@/lib/api-key-store";
 import { verifyApiKey } from "@/lib/optimize";
 
 type Props = {
   apiKey: string;
   onChange: (key: string) => void;
+  searchApiKey: string;
+  onSearchChange: (key: string) => void;
 };
 
-export function ApiKeyDialog({ apiKey, onChange }: Props) {
+export function ApiKeyDialog({
+  apiKey,
+  onChange,
+  searchApiKey,
+  onSearchChange,
+}: Props) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [show, setShow] = useState(false);
+  const [draftGemini, setDraftGemini] = useState("");
+  const [draftSearch, setDraftSearch] = useState("");
+  const [showGemini, setShowGemini] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const saved = Boolean(apiKey);
+  const [confirmDelete, setConfirmDelete] = useState<"gemini" | "search" | null>(null);
+
+  const geminiSaved = Boolean(apiKey);
+  const searchSaved = Boolean(searchApiKey);
 
   function handleOpen(next: boolean) {
     setOpen(next);
     if (next) {
-      setDraft("");
-      setShow(false);
+      setDraftGemini("");
+      setDraftSearch("");
+      setShowGemini(false);
+      setShowSearch(false);
     }
   }
 
-  function persist(next: string) {
+  function onSaveGemini() {
+    const next = draftGemini.trim();
     if (!isPlausibleApiKey(next)) {
-      toast.error("That does not look like an API key.");
-      return false;
+      toast.error("Gemini key does not look valid.");
+      return;
     }
     saveApiKey(next);
-    onChange(next.trim());
-    return true;
+    onChange(next);
+    toast.success(geminiSaved ? "Gemini key replaced." : "Gemini key saved.");
+    setDraftGemini("");
   }
 
-  async function onSave() {
-    const next = draft.trim();
-    if (!persist(next)) return;
-    toast.success(saved ? "API key replaced." : "API key saved in this browser.");
-    setOpen(false);
-  }
-
-  async function onVerify() {
-    const next = draft.trim() || apiKey;
+  function onSaveSearch() {
+    const next = draftSearch.trim();
     if (!isPlausibleApiKey(next)) {
-      toast.error("Enter an API key first.");
+      toast.error("Search key does not look valid.");
+      return;
+    }
+    saveSearchApiKey(next);
+    onSearchChange(next);
+    toast.success(searchSaved ? "Custom Search key replaced." : "Custom Search key saved.");
+    setDraftSearch("");
+  }
+
+  async function onVerifyGemini() {
+    const next = draftGemini.trim() || apiKey;
+    if (!isPlausibleApiKey(next)) {
+      toast.error("Enter a Gemini key first.");
       return;
     }
     setBusy(true);
     try {
       const result = await verifyApiKey({ data: { apiKey: next } });
       if (result.ok) {
-        persist(next);
-        toast.success("Key verified.");
-        setOpen(false);
+        saveApiKey(next);
+        onChange(next);
+        toast.success("Gemini key verified.");
+        setDraftGemini("");
       } else {
         toast.error(result.error);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not verify the key.");
+      toast.error(err instanceof Error ? err.message : "Could not verify the Gemini key.");
     } finally {
       setBusy(false);
     }
   }
 
-  function onDelete() {
+  function onDeleteGemini() {
     deleteApiKey();
     onChange("");
-    setDraft("");
-    setConfirmDelete(false);
-    setOpen(false);
-    toast.success("API key deleted from this browser.");
+    setDraftGemini("");
+    setConfirmDelete(null);
+    toast.message("Gemini key removed from this browser.");
   }
+
+  function onDeleteSearch() {
+    deleteSearchApiKey();
+    onSearchChange("");
+    setDraftSearch("");
+    setConfirmDelete(null);
+    toast.message("Custom Search key removed from this browser.");
+  }
+
+  const bothReady = geminiSaved && searchSaved;
 
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpen}>
         <DialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2">
+          <Button type="button" variant="outline" size="sm" className="h-9 gap-2">
             <KeyRound className="size-3.5" />
-            <span className="hidden sm:inline">{saved ? "API key" : "Add API key"}</span>
-            <Badge variant={saved ? "success" : "outline"} className="font-mono">
-              {saved ? maskApiKey(apiKey) : "required"}
-            </Badge>
+            <span className="hidden sm:inline">API keys</span>
+            {bothReady ? (
+              <Badge variant="secondary" className="hidden text-[10px] sm:inline">2/2</Badge>
+            ) : geminiSaved || searchSaved ? (
+              <Badge variant="outline" className="hidden text-[10px] sm:inline">1/2</Badge>
+            ) : null}
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Google AI Studio API key</DialogTitle>
+            <DialogTitle>API keys</DialogTitle>
             <DialogDescription>
-              Get a free key at{" "}
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-foreground"
-              >
-                aistudio.google.com/apikey
-              </a>
-              . Stored only in this browser. Sent with each run, never written on
-              the server. You can save, replace, or delete it at any time.
+              Two keys for the two features. Stored only in this browser — never
+              sent to our servers except when calling Google.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
-            {saved ? (
-              <p className="text-sm text-muted-foreground">
-                Saved key:{" "}
-                <span className="font-mono text-foreground">{maskApiKey(apiKey)}</span>
-              </p>
-            ) : null}
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="api-key-input">
-                {saved ? "Replace with a new key" : "Paste your key"}
-              </Label>
+
+          <div className="flex flex-col gap-6 py-1">
+            <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Gemini key</p>
+                  <p className="text-xs text-muted-foreground">
+                    Pipeline: keywords, rewrite, grammar, audit
+                  </p>
+                </div>
+                {geminiSaved ? (
+                  <Badge variant="secondary" className="text-[10px]">Saved {maskApiKey(apiKey)}</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px]">Required for Pipeline</Badge>
+                )}
+              </div>
+              <Label htmlFor="gemini-key-input" className="sr-only">Gemini API key</Label>
               <div className="relative">
                 <Input
-                  id="api-key-input"
+                  id="gemini-key-input"
                   autoComplete="off"
                   spellCheck={false}
-                  type={show ? "text" : "password"}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="AIza…"
-                  className="pr-11 font-mono"
+                  type={showGemini ? "text" : "password"}
+                  value={draftGemini}
+                  onChange={(e) => setDraftGemini(e.target.value)}
+                  placeholder={geminiSaved ? "Paste to replace…" : "AIza… (AI Studio / Generative Language)"}
+                  className="pr-11 font-mono text-sm"
                 />
                 <button
                   type="button"
                   className="absolute right-1 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-                  onClick={() => setShow((v) => !v)}
-                  aria-label={show ? "Hide key" : "Show key"}
+                  onClick={() => setShowGemini((v) => !v)}
+                  aria-label={showGemini ? "Hide Gemini key" : "Show Gemini key"}
                 >
-                  {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  {showGemini ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
               </div>
+              <div className="flex flex-wrap gap-2">
+                {geminiSaved ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-8 text-destructive" onClick={() => setConfirmDelete("gemini")}>
+                    <Trash2 className="size-3.5" /> Delete
+                  </Button>
+                ) : null}
+                <Button type="button" variant="outline" size="sm" className="h-8" disabled={busy} onClick={() => void onVerifyGemini()}>
+                  {busy ? "Checking…" : "Verify"}
+                </Button>
+                <Button type="button" size="sm" className="h-8" disabled={!draftGemini.trim()} onClick={onSaveGemini}>
+                  <Check className="size-3.5" /> {geminiSaved ? "Replace" : "Save"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Custom Search key</p>
+                  <p className="text-xs text-muted-foreground">
+                    Job Search: Google CSE (site:workable.com style)
+                  </p>
+                </div>
+                {searchSaved ? (
+                  <Badge variant="secondary" className="text-[10px]">Saved {maskApiKey(searchApiKey)}</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px]">Required for Job Search</Badge>
+                )}
+              </div>
+              <Label htmlFor="search-key-input" className="sr-only">Custom Search API key</Label>
+              <div className="relative">
+                <Input
+                  id="search-key-input"
+                  autoComplete="off"
+                  spellCheck={false}
+                  type={showSearch ? "text" : "password"}
+                  value={draftSearch}
+                  onChange={(e) => setDraftSearch(e.target.value)}
+                  placeholder={searchSaved ? "Paste to replace…" : "AIza… (Cloud key with Custom Search API)"}
+                  className="pr-11 font-mono text-sm"
+                />
+                <button
+                  type="button"
+                  className="absolute right-1 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowSearch((v) => !v)}
+                  aria-label={showSearch ? "Hide Search key" : "Show Search key"}
+                >
+                  {showSearch ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {searchSaved ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-8 text-destructive" onClick={() => setConfirmDelete("search")}>
+                    <Trash2 className="size-3.5" /> Delete
+                  </Button>
+                ) : null}
+                <Button type="button" size="sm" className="h-8" disabled={!draftSearch.trim()} onClick={onSaveSearch}>
+                  <Check className="size-3.5" /> {searchSaved ? "Replace" : "Save"}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Enable <strong>Custom Search API</strong> on this key's project.
+                Uses CSE cx <code className="rounded bg-muted px-1">37b3de50b6cb24ae5</code>.
+              </p>
             </div>
           </div>
+
           <DialogFooter>
-            {saved ? (
-              <Button
-                type="button"
-                variant="destructive"
-                className="sm:mr-auto"
-                onClick={() => setConfirmDelete(true)}
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </Button>
-            ) : null}
-            <Button type="button" variant="outline" onClick={onVerify} disabled={busy}>
-              {busy ? "Checking…" : "Verify"}
-            </Button>
-            <Button type="button" onClick={onSave} disabled={busy || !draft.trim()}>
-              <Check className="size-4" />
-              {saved ? "Replace" : "Save"}
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete the saved key?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Delete the {confirmDelete === "search" ? "Custom Search" : "Gemini"} key?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              It is removed from this browser only. The pipeline cannot run until
-              you save a key again.
+              Removed from this browser only.
+              {confirmDelete === "search"
+                ? " Job Search will not run until you save a search key again."
+                : " The pipeline will not run until you save a Gemini key again."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep key</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={onDelete}
+              onClick={() => (confirmDelete === "search" ? onDeleteSearch() : onDeleteGemini())}
             >
               Delete key
             </AlertDialogAction>
