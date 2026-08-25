@@ -146,9 +146,7 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
-  // Deployed behind uxapex.com/job (rewrite). Asset + router URLs must be
-  // prefixed so the browser requests /job/assets/... which the parent proxy
-  // forwards to this app. Direct ats-x.vercel.app/job also works.
+  // Prefix asset + public URLs with /job for the uxapex.com/job proxy.
   base: "/job/",
   server: {
     host: "0.0.0.0",
@@ -170,7 +168,11 @@ export default defineConfig(({ command, isPreview }) => ({
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({
+      router: {
+        basepath: "/job",
+      },
+    }),
     ...(command === "build" || isPreview
       ? [
           nitro({
