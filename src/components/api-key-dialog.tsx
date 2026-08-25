@@ -83,12 +83,12 @@ export function ApiKeyDialog({
   function onSaveSearch() {
     const next = draftSearch.trim();
     if (!isPlausibleApiKey(next)) {
-      toast.error("Search key does not look valid.");
+      toast.error("Serper key does not look valid.");
       return;
     }
     saveSearchApiKey(next);
     onSearchChange(next);
-    toast.success(searchSaved ? "Custom Search key replaced." : "Custom Search key saved.");
+    toast.success(searchSaved ? "Serper key replaced." : "Serper key saved.");
     setDraftSearch("");
   }
 
@@ -129,7 +129,7 @@ export function ApiKeyDialog({
     onSearchChange("");
     setDraftSearch("");
     setConfirmDelete(null);
-    toast.message("Custom Search key removed from this browser.");
+    toast.message("Serper key removed from this browser.");
   }
 
   const bothReady = geminiSaved && searchSaved;
@@ -153,7 +153,7 @@ export function ApiKeyDialog({
             <DialogTitle>API keys</DialogTitle>
             <DialogDescription>
               Two keys for the two features. Stored only in this browser — never
-              sent to our servers except when calling Google.
+              sent to our servers except when calling Gemini or Serper.
             </DialogDescription>
           </DialogHeader>
 
@@ -211,18 +211,18 @@ export function ApiKeyDialog({
             <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-medium">Custom Search key</p>
+                  <p className="text-sm font-medium">Serper (Job Search)</p>
                   <p className="text-xs text-muted-foreground">
-                    Job Search: Google CSE (site:workable.com style)
+                    Job Search: Serper Google results (site:workable.com style)
                   </p>
                 </div>
                 {searchSaved ? (
                   <Badge variant="secondary" className="text-[10px]">Saved {maskApiKey(searchApiKey)}</Badge>
                 ) : (
-                  <Badge variant="outline" className="text-[10px]">Required for Job Search</Badge>
+                  <Badge variant="outline" className="text-[10px]">Optional — improves results</Badge>
                 )}
               </div>
-              <Label htmlFor="search-key-input" className="sr-only">Custom Search API key</Label>
+              <Label htmlFor="search-key-input" className="sr-only">Serper API key</Label>
               <div className="relative">
                 <Input
                   id="search-key-input"
@@ -231,14 +231,14 @@ export function ApiKeyDialog({
                   type={showSearch ? "text" : "password"}
                   value={draftSearch}
                   onChange={(e) => setDraftSearch(e.target.value)}
-                  placeholder={searchSaved ? "Paste to replace…" : "AIza… (Cloud key with Custom Search API)"}
+                  placeholder={searchSaved ? "Paste to replace…" : "Serper API key from serper.dev"}
                   className="pr-11 font-mono text-sm"
                 />
                 <button
                   type="button"
                   className="absolute right-1 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
                   onClick={() => setShowSearch((v) => !v)}
-                  aria-label={showSearch ? "Hide Search key" : "Show Search key"}
+                  aria-label={showSearch ? "Hide Serper key" : "Show Serper key"}
                 >
                   {showSearch ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
@@ -254,8 +254,16 @@ export function ApiKeyDialog({
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Enable <strong>Custom Search API</strong> on this key's project.
-                Uses CSE cx <code className="rounded bg-muted px-1">37b3de50b6cb24ae5</code>.
+                Get a free key at{" "}
+                <a
+                  href="https://serper.dev"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  serper.dev
+                </a>{" "}
+                (2,500 free queries, no credit card).
               </p>
             </div>
           </div>
@@ -270,12 +278,12 @@ export function ApiKeyDialog({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete the {confirmDelete === "search" ? "Custom Search" : "Gemini"} key?
+              Delete the {confirmDelete === "search" ? "Serper" : "Gemini"} key?
             </AlertDialogTitle>
             <AlertDialogDescription>
               Removed from this browser only.
               {confirmDelete === "search"
-                ? " Job Search will not run until you save a search key again."
+                ? " Job Search will fall back to public web search until you save a Serper key again."
                 : " The pipeline will not run until you save a Gemini key again."}
             </AlertDialogDescription>
           </AlertDialogHeader>
