@@ -146,6 +146,10 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
+  // Deployed behind uxapex.com/job (rewrite). Asset + router URLs must be
+  // prefixed so the browser requests /job/assets/... which the parent proxy
+  // forwards to this app. Direct ats-x.vercel.app/job also works.
+  base: "/job/",
   server: {
     host: "0.0.0.0",
     port: 8080,

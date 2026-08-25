@@ -70,7 +70,19 @@ export default async function grokPwaMiddleware(
   const path = event.url.pathname;
   const urlWithQuery = path + event.url.search;
 
-  if (path === "/__grok/manifest.webmanifest" || path === "/__grok/manifest.json") {
+  // When served under base /job (uxapex.com/job), pathname may include the prefix
+  // if the upstream rewrite does not strip it.
+  const pathNoBase =
+    path === "/job" || path.startsWith("/job/")
+      ? path.slice("/job".length) || "/"
+      : path;
+
+  if (
+    pathNoBase === "/__grok/manifest.webmanifest" ||
+    pathNoBase === "/__grok/manifest.json" ||
+    path === "/__grok/manifest.webmanifest" ||
+    path === "/__grok/manifest.json"
+  ) {
     return new Response(renderWebManifest(requestHost(event)), {
       headers: {
         "content-type": "application/manifest+json; charset=utf-8",
@@ -81,7 +93,7 @@ export default async function grokPwaMiddleware(
 
   if (
     isInstallQuery(urlWithQuery) &&
-    isDocumentPath(path) &&
+    isDocumentPath(pathNoBase) &&
     acceptsHtml(event.req.headers.get("accept"))
   ) {
     const html = renderInstallPageHtml(installPageTemplate, {
@@ -96,7 +108,7 @@ export default async function grokPwaMiddleware(
     });
   }
 
-  if (!isDocumentPath(path)) return next();
+  if (!isDocumentPath(pathNoBase)) return next();
 
   const result = await next();
   if (

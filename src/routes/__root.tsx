@@ -6,6 +6,13 @@ import appCss from "../styles.css?url";
 
 const APP_NAME = "ATS Align";
 
+/** Vite base ends with `/` (e.g. `/job/`). Join without double slashes. */
+function assetUrl(path: string): string {
+  const base = import.meta.env.BASE_URL || "/";
+  const cleaned = path.replace(/^\/+/, "");
+  return `${base}${cleaned}`;
+}
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -20,10 +27,10 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#12110F" },
     ],
     links: [
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "icon", type: "image/svg+xml", href: assetUrl("favicon.svg") },
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+      { rel: "manifest", href: assetUrl("__grok/manifest.webmanifest") },
+      { rel: "apple-touch-icon", href: assetUrl("__grok/icon-180.png") },
       {
         rel: "preconnect",
         href: "https://fonts.googleapis.com",
