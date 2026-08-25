@@ -58,6 +58,7 @@ export type AuditResult = {
 };
 
 export const API_KEY_STORAGE = "ats-align.gemini-api-key";
+export const SEARCH_API_KEY_STORAGE = "ats-align.search-api-key";
 export const DRAFT_STORAGE = "ats-align.draft";
 
 export const MAX_RESUME_CHARS = 80_000;
