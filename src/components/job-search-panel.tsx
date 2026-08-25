@@ -46,7 +46,7 @@ type Props = {
   setResumeHtml: (v: string) => void;
   /** Gemini key — Send to inputs / pipeline only */
   apiKey: string;
-  /** Custom Search key — Job Search only */
+  /** Serper key — Job Search only */
   searchApiKey: string;
   running: boolean;
   onSendToInputs: (job: JobResult) => void;
@@ -112,7 +112,7 @@ export function JobSearchPanel({
       return;
     }
     // Job Search does NOT require a key when public fallback is enough,
-    // but if a Custom Search key is saved we use it first.
+    // but if a Serper key is saved we use it first.
     setSearching(true);
     setResults([]);
     try {
@@ -129,16 +129,16 @@ export function JobSearchPanel({
       setResults(res.results);
       for (const e of res.errors) toast.error(e, { duration: 9000 });
       if (res.keyHint) {
-        toast.message(`Job Search used Custom Search key ${res.keyHint}`);
+        toast.message(`Job Search used Serper key ${res.keyHint}`);
       }
       if (res.results.length === 0) {
         toast.message("No recent listings found for that title on the four ATS portals.");
       } else {
         const via =
-          res.engine === "google-cse"
-            ? "Google Custom Search"
+          res.engine === "serper"
+            ? "Serper"
             : res.engine === "mixed"
-              ? "public web search (CSE unavailable)"
+              ? "public web search (Serper unavailable)"
               : "public web search";
         toast.success(
           `Found ${res.results.length} listing${res.results.length === 1 ? "" : "s"} via ${via}.`,
@@ -167,7 +167,7 @@ export function JobSearchPanel({
         </h1>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
           Searches Workable, Greenhouse, Lever, and Dover for your title. Uses your{" "}
-          <strong>Custom Search</strong> key when available; otherwise public web search.
+          <strong>Serper</strong> key when available; otherwise public web search.
           The <strong>Gemini</strong> key is only for the Pipeline (rewrite).
         </p>
       </section>
