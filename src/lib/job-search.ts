@@ -230,38 +230,90 @@ function parseBingHtml(html: string): ParsedHit[] {
   return hits;
 }
 
-async function searchPortalBingFallback(
+function parseDuckDuckGoHtml(html: string): ParsedHit[] {
+  const hits: ParsedHit[] = [];
+  const rowRe = /<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*class="result-link"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const href = cleanHref(m[1] ?? "");
+    const title = decodeEntities((m[2] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    if (!title || !href.startsWith("http")) continue;
+    hits.push({ title, href, summary: "" });
+  }
+  if (hits.length === 0) {
+    const blocks = html.split(/class="[^"]*result[^"]*"/i).slice(1);
+    for (const block of blocks) {
+      const linkMatch =
+        block.match(/<a[^>]+href="([^"]+)"[^>]*class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+        block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+      if (!linkMatch) continue;
+      const href = cleanHref(linkMatch[1] ?? "");
+      const title = decodeEntities((linkMatch[2] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      if (!title || !href.startsWith("http")) continue;
+      const snip = block.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+      const summary = snip?.[1]
+        ? decodeEntities(snip[1].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 280)
+        : "";
+      hits.push({ title, href, summary });
+    }
+  }
+  return hits;
+}
+
+async function searchPortalPublic(
   title: string,
   portal: (typeof PORTALS)[number],
 ): Promise<{ portal: JobPortal; results: JobResult[]; error?: string }> {
   const queries = [`"${title}" site:${portal.site}`, `${title} site:${portal.site}`];
-  const tryOnce = async (q: string) => {
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20&setlang=en-US&cc=US`;
-    const res = await fetch(url, {
-      redirect: "follow",
-      headers: { ...BROWSER_HEADERS, Referer: "https://www.bing.com/" },
-      signal: AbortSignal.timeout(14000),
-    });
-    if (!res.ok) return { ok: false as const, status: res.status, results: [] as JobResult[] };
-    const html = await res.text();
-    const hits = parseBingHtml(html).filter((h) => portal.hostHint.test(h.href));
-    return { ok: true as const, status: res.status, results: filterRecent(hits.map((h) => hitToJob(h, portal.id))) };
-  };
-  try {
-    let lastStatus = 0;
-    for (const q of queries) {
-      const r = await tryOnce(q);
-      lastStatus = r.status;
-      if (r.results.length > 0) return { portal: portal.id, results: r.results };
+  const errors: string[] = [];
+
+  for (const q of queries) {
+    try {
+      const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20&setlang=en-US&cc=US`;
+      const res = await fetch(url, {
+        redirect: "follow",
+        headers: { ...BROWSER_HEADERS, Referer: "https://www.bing.com/" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) {
+        errors.push(`Bing ${res.status}`);
+        continue;
+      }
+      const html = await res.text();
+      const hits = parseBingHtml(html).filter((h) => portal.hostHint.test(h.href));
+      const results = filterRecent(hits.map((h) => hitToJob(h, portal.id)));
+      if (results.length > 0) return { portal: portal.id, results };
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "Bing error");
     }
-    if (lastStatus && lastStatus >= 400) {
-      return { portal: portal.id, results: [], error: `${portal.label}: Bing HTTP ${lastStatus}` };
-    }
-    return { portal: portal.id, results: [] };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Bing failed";
-    return { portal: portal.id, results: [], error: `${portal.label}: ${message}` };
   }
+
+  for (const q of queries) {
+    try {
+      const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, {
+        redirect: "follow",
+        headers: { ...BROWSER_HEADERS, Referer: "https://lite.duckduckgo.com/" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) {
+        errors.push(`DDG ${res.status}`);
+        continue;
+      }
+      const html = await res.text();
+      const hits = parseDuckDuckGoHtml(html).filter((h) => portal.hostHint.test(h.href));
+      const results = filterRecent(hits.map((h) => hitToJob(h, portal.id)));
+      if (results.length > 0) return { portal: portal.id, results };
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "DDG error");
+    }
+  }
+
+  return {
+    portal: portal.id,
+    results: [],
+    error: errors.length > 0 ? `${portal.label}: public search empty (${errors.slice(0, 2).join("; ")})` : undefined,
+  };
 }
 
 export const extractJobTitle = createServerFn({ method: "POST" })
@@ -277,24 +329,25 @@ export const extractJobTitle = createServerFn({ method: "POST" })
     return { ok: true as const, title };
   });
 
+/** Job Search only — uses searchApiKey (Custom Search), never the Gemini pipeline key. */
 export const searchAtsJobs = createServerFn({ method: "POST" })
   .validator(
     z.object({
       title: z.string().trim().min(2).max(120),
-      apiKey: z.string().trim().min(20).optional(),
+      searchApiKey: z.string().trim().min(20).optional(),
     }),
   )
   .handler(async ({ data }) => {
     const title = data.title.trim();
-    const apiKey = data.apiKey?.trim();
+    const searchApiKey = data.searchApiKey?.trim();
 
     const errors: string[] = [];
     const all: JobResult[] = [];
-    let engine: "google-cse" | "bing" | "mixed" = apiKey ? "google-cse" : "bing";
+    let engine: "google-cse" | "public" | "mixed" = "public";
     let cseAccessDenied = false;
 
-    if (apiKey) {
-      const cse = await Promise.all(PORTALS.map((p) => searchPortalGoogleCse(title, p, apiKey)));
+    if (searchApiKey) {
+      const cse = await Promise.all(PORTALS.map((p) => searchPortalGoogleCse(title, p, searchApiKey)));
       for (const s of cse) {
         all.push(...s.results);
         if (s.error && s.results.length === 0) {
@@ -305,7 +358,8 @@ export const searchAtsJobs = createServerFn({ method: "POST" })
             low.includes("has not been used") ||
             low.includes("is disabled") ||
             low.includes("accessnotconfigured") ||
-            low.includes("permission denied")
+            low.includes("permission denied") ||
+            low.includes("api_key_service_blocked")
           ) {
             cseAccessDenied = true;
           } else {
@@ -313,20 +367,21 @@ export const searchAtsJobs = createServerFn({ method: "POST" })
           }
         }
       }
+      if (all.length > 0) engine = "google-cse";
     }
 
     if (all.length === 0) {
       if (cseAccessDenied) {
         errors.push(
-          "Custom Search JSON API is not enabled on this key's Google Cloud project. Enable it: APIs & Services → Library → Custom Search API. AI Studio-only keys often cannot call Custom Search — use a Cloud Console key. Falling back to Bing…",
+          "Custom Search key rejected by Google (project has no Custom Search JSON API access / billing). Using public web search instead…",
         );
       }
-      const fallback = await Promise.all(PORTALS.map((p) => searchPortalBingFallback(title, p)));
-      for (const s of fallback) {
+      const pub = await Promise.all(PORTALS.map((p) => searchPortalPublic(title, p)));
+      for (const s of pub) {
         all.push(...s.results);
         if (s.error && s.results.length === 0) errors.push(s.error);
       }
-      engine = apiKey ? "mixed" : "bing";
+      engine = searchApiKey ? "mixed" : "public";
     }
 
     const seenErr = new Set<string>();
@@ -353,6 +408,7 @@ export const searchAtsJobs = createServerFn({ method: "POST" })
       errors: uniqueErrors,
       engine,
       cseAccessDenied,
+      keyHint: searchApiKey ? `${searchApiKey.slice(0, 4)}…${searchApiKey.slice(-4)}` : null,
       searchedAt: new Date().toISOString(),
     };
   });
