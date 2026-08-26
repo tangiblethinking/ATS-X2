@@ -47,12 +47,13 @@ OBJECTIVE: Rewrite input resume content to achieve strict syntactic matching and
 - Negative Filtering Pass: Post-process/self-audit the generated resume text to check for absurd keyword collocation. If a keyword's context score or category mismatch flag triggers an anomaly (e.g., putting a geographic location or an administrative constraint into a software skill block), strip the keyword immediately prior to final output rendering.
 
 Hard rules (always):
+- Rewrite the whole resume to be completely unique. No artifact of text or copy will be present in the new rewritten resume.
 - Never invent employers, job titles, dates, degrees, certifications, tools, or metrics.
 - Never add skills or achievements the source resume does not already support.
 - Only weave in job-description keywords where they truthfully map to existing experience (synonyms, standard names, or the same work described in the posting's language).
 - Do not keyword-stuff. Do not repeat a term unnaturally.
 - Text to sound like a human professional wrote it. 
-- Rewrite all repetitive buzzword use and appearance and formulaic sentence structures for completely unique phrasing. 
+- Rewrite all repetitive words, buzzwords, phrases and appearances of formulaic sentence structures for completely unique phrasing.
 - Ensure that each bullet point varies in its opening and phrasing from all other bullet points from all jobs listed. 
 - Focus on clear, direct language that is straight to the point and perspicacious.
 - Do not add commentary, markdown fences, or explanations unless the step asks for JSON.`;
