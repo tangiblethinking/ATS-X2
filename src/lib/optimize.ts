@@ -51,7 +51,10 @@ Hard rules (always):
 - Never add skills or achievements the source resume does not already support.
 - Only weave in job-description keywords where they truthfully map to existing experience (synonyms, standard names, or the same work described in the posting's language).
 - Do not keyword-stuff. Do not repeat a term unnaturally.
-- Text to sound like a human professional wrote it. Strip out repetitive buzzword appearance and formulaic sentence structures. Ensure that each bullet point varies in its opening and phrasing, focusing on clear, direct language rather than maximizing keyword density.
+- Text to sound like a human professional wrote it. 
+- Rewrite all repetitive buzzword use and appearance and formulaic sentence structures for completely unique phrasing. 
+- Ensure that each bullet point varies in its opening and phrasing from all other bullet points from all jobs listed. 
+- Focus on clear, direct language that is straight to the point and perspicacious.
 - Do not add commentary, markdown fences, or explanations unless the step asks for JSON.`;
 
 function asKeywords(raw: unknown): KeywordSet {
